@@ -2,4 +2,13 @@
     <string name="app_name">CFD Remote Assist</string>
     <string name="accessibility_service_label">Remote Assist Remote Control</string>
     <string name="accessibility_service_description">Enables remote control for technical assistance.</string>
+
+    <string name="settings_password_title">Settings Password</string>
+    <string name="settings_password_desc">Password to access the settings page</string>
+    <string name="connection_secret_title">Connection Secret</string>
+    <string name="connection_secret_desc">Secret code for unattended remote access</string>
+    <string name="tracking_server_url_title">Tracking Server URL</string>
+    <string name="tracking_server_url_desc">URL of the server for location tracking</string>
+    <string name="tracking_interval_title">Tracking Interval (minutes)</string>
+    <string name="tracking_interval_desc">Interval in minutes for sending location updates</string>
 </resources>

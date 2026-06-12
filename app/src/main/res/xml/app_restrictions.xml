@@ -3,30 +3,30 @@
 
     <restriction
         android:key="settings_password"
-        android:title="Settings Password"
+        android:title="@string/settings_password_title"
         android:restrictionType="string"
-        android:description="Password to access the settings page"
+        android:description="@string/settings_password_desc"
         android:defaultValue="admin123" />
 
     <restriction
         android:key="connection_secret"
-        android:title="Connection Secret"
+        android:title="@string/connection_secret_title"
         android:restrictionType="string"
-        android:description="Secret code for unattended remote access"
+        android:description="@string/connection_secret_desc"
         android:defaultValue="3757" />
 
     <restriction
         android:key="tracking_server_url"
-        android:title="Tracking Server URL"
+        android:title="@string/tracking_server_url_title"
         android:restrictionType="string"
-        android:description="URL of the server for location tracking"
+        android:description="@string/tracking_server_url_desc"
         android:defaultValue="https://example.com/track" />
 
     <restriction
         android:key="tracking_interval"
-        android:title="Tracking Interval (minutes)"
+        android:title="@string/tracking_interval_title"
         android:restrictionType="integer"
-        android:description="Interval in minutes for sending location updates"
+        android:description="@string/tracking_interval_desc"
         android:defaultValue="15" />
 
 </restrictions>
