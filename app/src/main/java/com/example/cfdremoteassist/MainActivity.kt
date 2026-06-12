@@ -45,6 +45,9 @@ fun MainScreen() {
     var showPasswordDialog by remember { mutableStateOf(false) }
     
     var showRegistrationDialog by remember { mutableStateOf(!configManager.isRegistered()) }
+    var isRegistering by remember { mutableStateOf(false) }
+    var registrationError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
         Column(
@@ -78,12 +81,27 @@ fun MainScreen() {
     if (showRegistrationDialog) {
         RegistrationDialog(
             serverUrl = configManager.getTrackingServerUrl(),
+            isLoading = isRegistering,
+            errorMessage = registrationError,
             onRegister = {
-                configManager.setRegistered(true)
-                showRegistrationDialog = false
-                // Start service immediately upon registration
-                val intent = Intent(context, LocationTrackingService::class.java)
-                context.startForegroundService(intent)
+                isRegistering = true
+                registrationError = null
+                
+                // Simulate network registration call
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    val success = false // Simulate a failure to test error handling
+                    
+                    if (success) {
+                        configManager.setRegistered(true)
+                        showRegistrationDialog = false
+                        isRegistering = false
+                        val intent = Intent(context, LocationTrackingService::class.java)
+                        context.startForegroundService(intent)
+                    } else {
+                        isRegistering = false
+                        registrationError = "Could not connect to management server. Please check connection and try again."
+                    }
+                }, 2000)
             }
         )
     }
@@ -340,18 +358,44 @@ fun SettingsPanel(configManager: ManagedConfigManager, onLock: () -> Unit) {
 }
 
 @Composable
-fun RegistrationDialog(serverUrl: String, onRegister: () -> Unit) {
+fun RegistrationDialog(
+    serverUrl: String, 
+    isLoading: Boolean, 
+    errorMessage: String?, 
+    onRegister: () -> Unit
+) {
     AlertDialog(
         onDismissRequest = { }, // Force registration
         title = { Text("Registration Required") },
         text = {
-            Column {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                 Text("This device needs to be registered with the management server:")
-                Text(text = serverUrl, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
+                Text(
+                    text = serverUrl, 
+                    style = MaterialTheme.typography.bodyLarge, 
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+                
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.padding(top = 16.dp))
+                    Text("Registering...", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+                }
+                
+                if (errorMessage != null) {
+                    Text(
+                        text = errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 16.dp)
+                    )
+                }
             }
         },
         confirmButton = {
-            Button(onClick = onRegister) {
+            Button(
+                onClick = onRegister,
+                enabled = !isLoading
+            ) {
                 Text("Register with Server")
             }
         }
