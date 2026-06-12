@@ -14,7 +14,7 @@ class ManagedConfigManager(context: Context) {
 
     fun getConnectionSecret(): String {
         val appRestrictions: Bundle = restrictionsManager.applicationRestrictions
-        return appRestrictions.getString("connection_secret", "secret123")
+        return appRestrictions.getString("connection_secret", "3757")
     }
 
     fun getTrackingServerUrl(): String {

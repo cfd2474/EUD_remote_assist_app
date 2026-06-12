@@ -13,7 +13,7 @@
         android:title="Connection Secret"
         android:restrictionType="string"
         android:description="Secret code for unattended remote access"
-        android:defaultValue="secret123" />
+        android:defaultValue="3757" />
 
     <restriction
         android:key="tracking_server_url"
