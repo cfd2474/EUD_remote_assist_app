@@ -329,10 +329,6 @@ class ScreenShareService : Service() {
             }
             override fun onAddTrack(receiver: RtpReceiver, mediaStreams: Array<out MediaStream>) {}
         })
-
-        Log.d("ScreenShare", "Adding local video track to PeerConnection via Transceiver")
-        val init = RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY, listOf("stream0"))
-        peerConnection?.addTransceiver(localVideoTrack, init)
     }
 
     private fun renegotiate() {
@@ -396,8 +392,13 @@ class ScreenShareService : Service() {
                                 Log.d("ScreenShare", "Remote Description Set")
                                 
                                 // Requirement: Add track only after receiving offer
-                                Log.d("ScreenShare", "Adding local video track to PeerConnection (Post-Offer)")
-                                peerConnection?.addTrack(localVideoTrack, listOf("stream0"))
+                                val isTrackAlreadyAdded = peerConnection?.senders?.any { it.track()?.id() == localVideoTrack?.id() } ?: false
+                                if (!isTrackAlreadyAdded) {
+                                    Log.d("ScreenShare", "Adding local video track to PeerConnection (Post-Offer)")
+                                    peerConnection?.addTrack(localVideoTrack, listOf("stream0"))
+                                } else {
+                                    Log.d("ScreenShare", "Local video track already added to PeerConnection")
+                                }
 
                                 peerConnection?.createAnswer(object : SimpleSdpObserver() {
                                     override fun onCreateSuccess(desc: SessionDescription) {
