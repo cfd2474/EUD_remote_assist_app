@@ -35,6 +35,8 @@ class ScreenShareService : Service() {
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var eglBase: EglBase? = null
     private var lastProcessedOfferSdp: String? = null
+    private var captureWidth = 0
+    private var captureHeight = 0
     
     private val pollHandler = Handler(Looper.getMainLooper())
     private var pollRunnable: Runnable? = null
@@ -208,10 +210,10 @@ class ScreenShareService : Service() {
         videoCapturer!!.initialize(surfaceTextureHelper, this, wrappingObserver)
         
         // Use half resolution for better performance and faster start
-        val width = metrics.widthPixels / 2
-        val height = metrics.heightPixels / 2
-        Log.d("ScreenShare", "Starting capture at ${width}x${height}")
-        videoCapturer!!.startCapture(width, height, 30)
+        captureWidth = metrics.widthPixels / 2
+        captureHeight = metrics.heightPixels / 2
+        Log.d("ScreenShare", "Starting capture at ${captureWidth}x${captureHeight}")
+        videoCapturer!!.startCapture(captureWidth, captureHeight, 30)
 
         localVideoTrack = peerConnectionFactory?.createVideoTrack("VIDEO_TRACK", videoSource)
         localVideoTrack?.setEnabled(true)
@@ -219,6 +221,36 @@ class ScreenShareService : Service() {
         setupPeerConnection()
         
         startSignalingPoll()
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        Log.d("ScreenShare", "Configuration changed, checking orientation")
+        onDisplayRotated()
+    }
+
+    private fun onDisplayRotated() {
+        val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val metrics = DisplayMetrics()
+        windowManager.defaultDisplay.getRealMetrics(metrics)
+        
+        val newW = metrics.widthPixels / 2
+        val newH = metrics.heightPixels / 2
+        
+        if (newW == captureWidth && newH == captureHeight) return
+        
+        Log.i("ScreenShare", "Orientation changed: ${captureWidth}x${captureHeight} -> ${newW}x${newH}")
+        captureWidth = newW
+        captureHeight = newH
+        
+        videoCapturer?.changeCaptureFormat(newW, newH, 30)
+        
+        val payload = JsonObject().apply {
+            addProperty("width", metrics.widthPixels)
+            addProperty("height", metrics.heightPixels)
+            addProperty("orientation", if (newW > newH) "landscape" else "portrait")
+        }
+        sendDeviceEvent("ORIENTATION_CHANGED", payload)
     }
 
     private fun startSignalingPoll() {
@@ -291,18 +323,46 @@ class ScreenShareService : Service() {
             override fun onDataChannel(channel: DataChannel) {}
             override fun onRenegotiationNeeded() {
                 Log.d("ScreenShare", "Renegotiation Needed")
+                if (peerConnection?.signalingState() == PeerConnection.SignalingState.STABLE) {
+                    renegotiate()
+                }
             }
             override fun onAddTrack(receiver: RtpReceiver, mediaStreams: Array<out MediaStream>) {}
         })
+
+        Log.d("ScreenShare", "Adding local video track to PeerConnection via Transceiver")
+        val init = RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY, listOf("stream0"))
+        peerConnection?.addTransceiver(localVideoTrack, init)
     }
 
-    private fun sendDeviceEvent(eventName: String) {
+    private fun renegotiate() {
+        Log.d("ScreenShare", "Initiating renegotiation answer")
+        peerConnection?.createAnswer(object : SimpleSdpObserver() {
+            override fun onCreateSuccess(desc: SessionDescription) {
+                peerConnection?.setLocalDescription(object : SimpleSdpObserver() {
+                    override fun onSetSuccess() {
+                        val answerJson = JsonObject().apply {
+                            addProperty("type", "webrtc")
+                            val sdpAnswer = JsonObject().apply {
+                                addProperty("type", "answer")
+                                addProperty("sdp", desc.description)
+                            }
+                            add("sdp", sdpAnswer)
+                        }
+                        networkManager.sendWebSocketMessage(gson.toJson(answerJson))
+                    }
+                }, desc)
+            }
+        }, MediaConstraints())
+    }
+
+    private fun sendDeviceEvent(eventName: String, payload: JsonObject = JsonObject()) {
         val uid = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
         val eventJson = JsonObject().apply {
             addProperty("type", "device_event")
             addProperty("uid", uid)
             addProperty("event", eventName)
-            add("payload", JsonObject())
+            add("payload", payload)
         }
         networkManager.sendWebSocketMessage(gson.toJson(eventJson))
     }
