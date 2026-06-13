@@ -17,35 +17,63 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
             event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
             
-            val packageName = event.packageName?.toString()
-            if (packageName == "com.android.systemui" || packageName == "com.google.android.systemui") {
-                findAndClickMediaProjectionButtons(rootInActiveWindow)
+            val packageName = event.packageName?.toString() ?: ""
+            
+            // System UI or Android System is usually responsible for this dialog
+            if (packageName.contains("systemui") || packageName.contains("android") || packageName.isEmpty()) {
+                // Try multiple times as the window might still be loading
+                serviceHandler.removeCallbacks(autoAcceptRunnable)
+                serviceHandler.postDelayed(autoAcceptRunnable, 200)
+                serviceHandler.postDelayed(autoAcceptRunnable, 500)
+                serviceHandler.postDelayed(autoAcceptRunnable, 1000)
             }
         }
+    }
+
+    private val serviceHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val autoAcceptRunnable = Runnable {
+        findAndClickMediaProjectionButtons(rootInActiveWindow)
     }
 
     private fun findAndClickMediaProjectionButtons(node: AccessibilityNodeInfo?) {
         if (node == null) return
 
-        // 1. Look for "Start now" or "Allow" buttons
-        val textToFind = listOf("Start now", "Allow", "Entire screen", "Start recording")
+        // 1. Look for specific system button IDs and text patterns
+        val textToFind = listOf("Start now", "Allow", "Entire screen", "Start recording", "START NOW", "ALLOW")
+        val idsToFind = listOf(
+            "android:id/button1", // Standard "OK/Positive" button ID
+            "com.android.systemui:id/remember_checkbox",
+            "com.android.systemui:id/button_start_now",
+            "com.android.systemui:id/start_button"
+        )
         
+        // Try IDs first (more reliable)
+        for (id in idsToFind) {
+            val nodes = node.findAccessibilityNodeInfosByViewId(id)
+            for (foundNode in nodes) {
+                if (foundNode.isClickable || foundNode.isCheckable) {
+                    Log.d("AccessibilityService", "Auto-acting on ID: $id")
+                    foundNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    if (foundNode.isCheckable) continue 
+                }
+            }
+        }
+
+        // Try Text patterns
         for (text in textToFind) {
             val nodes = node.findAccessibilityNodeInfosByText(text)
             for (foundNode in nodes) {
                 if (foundNode.isClickable) {
-                    Log.d("AccessibilityService", "Auto-clicking button: $text")
+                    Log.d("AccessibilityService", "Auto-clicking text: $text")
                     foundNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                    foundNode.recycle()
-                    return
                 }
-                foundNode.recycle()
             }
         }
 
         // 2. Recursive search for children
         for (i in 0 until node.childCount) {
-            findAndClickMediaProjectionButtons(node.getChild(i))
+            val child = node.getChild(i)
+            findAndClickMediaProjectionButtons(child)
         }
     }
 
