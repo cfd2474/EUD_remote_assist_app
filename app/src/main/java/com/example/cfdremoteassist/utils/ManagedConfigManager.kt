@@ -23,7 +23,11 @@ class ManagedConfigManager(context: Context) {
     }
 
     fun setManualServerUrl(url: String) {
-        prefs.edit().putString("manual_server_url", url.trimEnd('/')).apply()
+        var formattedUrl = url.trim()
+        if (formattedUrl.isNotEmpty() && !formattedUrl.startsWith("http://") && !formattedUrl.startsWith("https://")) {
+            formattedUrl = "https://$formattedUrl"
+        }
+        prefs.edit().putString("manual_server_url", formattedUrl.trimEnd('/')).apply()
     }
 
     fun getConnectionSecret(): String {
