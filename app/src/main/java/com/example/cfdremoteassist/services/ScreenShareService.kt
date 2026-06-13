@@ -235,6 +235,8 @@ class ScreenShareService : Service() {
         captureHeight = metrics.heightPixels / 2
         RemoteSessionManager.captureWidth = captureWidth
         RemoteSessionManager.captureHeight = captureHeight
+        RemoteSessionManager.displayWidth = metrics.widthPixels
+        RemoteSessionManager.displayHeight = metrics.heightPixels
         Log.d("ScreenShare", "Starting capture at ${captureWidth}x${captureHeight}")
         videoCapturer!!.startCapture(captureWidth, captureHeight, 30)
 
@@ -267,6 +269,8 @@ class ScreenShareService : Service() {
         captureHeight = newH
         RemoteSessionManager.captureWidth = captureWidth
         RemoteSessionManager.captureHeight = captureHeight
+        RemoteSessionManager.displayWidth = metrics.widthPixels
+        RemoteSessionManager.displayHeight = metrics.heightPixels
         
         videoCapturer?.changeCaptureFormat(newW, newH, 30)
         

@@ -12,8 +12,10 @@ import java.util.Locale
 
 class RemoteControlHandler(
     private val service: AccessibilityService,
-    private val captureWidth: () -> Int,
-    private val captureHeight: () -> Int,
+    /** Physical display width in pixels — `WindowManager.currentWindowMetrics.bounds.width()` */
+    private val displayWidth: () -> Int,
+    /** Physical display height in pixels — `WindowManager.currentWindowMetrics.bounds.height()` */
+    private val displayHeight: () -> Int,
     private val keyInjector: KeyInjector = ChainedKeyInjector(InstrumentationKeyInjector(), ShellKeyInjector()),
 ) {
     private val tag = "RemoteControlHandler"
@@ -25,6 +27,7 @@ class RemoteControlHandler(
             "CLICK" -> injectClick(
                 message.optDouble("x_percent", 0.0),
                 message.optDouble("y_percent", 0.0),
+                message
             )
             "SWIPE" -> injectSwipe(
                 message.optDouble("x_percent", 0.0),
@@ -32,10 +35,12 @@ class RemoteControlHandler(
                 message.optDouble("x2_percent", 0.0),
                 message.optDouble("y2_percent", 0.0),
                 message.optLong("duration_ms", 350L),
+                message
             )
             "LONG_PRESS" -> injectLongPress(
                 message.optDouble("x_percent", 0.0),
                 message.optDouble("y_percent", 0.0),
+                message
             )
             "KEY" -> injectKey(
                 message.optString("key"),
@@ -46,25 +51,37 @@ class RemoteControlHandler(
     }
 
     private fun toX(xPercent: Double): Float {
-        val w = captureWidth().coerceAtLeast(1)
+        val w = displayWidth().coerceAtLeast(1)
         return (xPercent * w).toFloat().coerceIn(0f, w - 1f)
     }
 
     private fun toY(yPercent: Double): Float {
-        val h = captureHeight().coerceAtLeast(1)
+        val h = displayHeight().coerceAtLeast(1)
         return (yPercent * h).toFloat().coerceIn(0f, h - 1f)
     }
 
-    private fun injectClick(xPercent: Double, yPercent: Double) {
-        val x = toX(xPercent)
-        val y = toY(yPercent)
-        dispatchStroke(x, y, x, y, durationMs = 50L)
-        Log.d(tag, "CLICK at $x,$y")
+    private fun logScaleHint(message: JSONObject) {
+        val sw = message.optInt("stream_width", 0)
+        val sh = message.optInt("stream_height", 0)
+        if (sw > 0 && sh > 0) {
+            val dw = displayWidth()
+            val dh = displayHeight()
+            Log.d(tag, "display=${dw}x${dh} stream=${sw}x${sh}")
+        }
     }
 
-    private fun injectLongPress(xPercent: Double, yPercent: Double) {
+    private fun injectClick(xPercent: Double, yPercent: Double, message: JSONObject) {
         val x = toX(xPercent)
         val y = toY(yPercent)
+        logScaleHint(message)
+        dispatchStroke(x, y, x, y, durationMs = 50L)
+        Log.d(tag, "CLICK at $x,$y (${displayWidth()}x${displayHeight()})")
+    }
+
+    private fun injectLongPress(xPercent: Double, yPercent: Double, message: JSONObject) {
+        val x = toX(xPercent)
+        val y = toY(yPercent)
+        logScaleHint(message)
         dispatchStroke(x, y, x, y, durationMs = 600L)
         Log.d(tag, "LONG_PRESS at $x,$y")
     }
@@ -75,12 +92,14 @@ class RemoteControlHandler(
         x2Percent: Double,
         y2Percent: Double,
         durationMs: Long,
+        message: JSONObject
     ) {
         val x1 = toX(x1Percent)
         val y1 = toY(y1Percent)
         val x2 = toX(x2Percent)
         val y2 = toY(y2Percent)
         val duration = durationMs.coerceIn(100L, 2000L)
+        logScaleHint(message)
         dispatchStroke(x1, y1, x2, y2, durationMs = duration)
         Log.d(tag, "SWIPE ($x1,$y1)→($x2,$y2) ${duration}ms")
     }

@@ -99,8 +99,8 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
         Log.d("AccessibilityService", "Service Connected")
         controlHandler = RemoteControlHandler(
             service = this,
-            captureWidth = { RemoteSessionManager.captureWidth },
-            captureHeight = { RemoteSessionManager.captureHeight }
+            displayWidth = { RemoteSessionManager.displayWidth },
+            displayHeight = { RemoteSessionManager.displayHeight }
         )
     }
 
