@@ -23,11 +23,20 @@ class ManagedConfigManager(context: Context) {
         if (!managedUrl.isNullOrEmpty()) {
             return managedUrl
         }
-        return prefs.getString("manual_server_url", "") ?: ""
+        val address = prefs.getString("manual_server_address", "") ?: ""
+        val port = prefs.getString("manual_server_port", "") ?: ""
+        if (address.isEmpty()) return ""
+        return "https://$address${if (port.isNotEmpty()) ":$port" else ""}/track"
     }
 
-    fun setManualServerUrl(url: String) {
-        prefs.edit().putString("manual_server_url", url).apply()
+    fun getManualAddress(): String = prefs.getString("manual_server_address", "") ?: ""
+    fun getManualPort(): String = prefs.getString("manual_server_port", "") ?: ""
+
+    fun setManualServerConfig(address: String, port: String) {
+        prefs.edit()
+            .putString("manual_server_address", address)
+            .putString("manual_server_port", port)
+            .apply()
     }
 
     fun hasManagedConfig(): Boolean {

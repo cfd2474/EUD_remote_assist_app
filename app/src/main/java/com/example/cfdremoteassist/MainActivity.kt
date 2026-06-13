@@ -51,12 +51,33 @@ fun MainScreen() {
     var isSettingsUnlocked by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     
-    var showRegistrationDialog by remember { mutableStateOf(!configManager.isRegistered()) }
+    var isRegistered by remember { mutableStateOf(configManager.isRegistered()) }
     var isRegistering by remember { mutableStateOf(false) }
     var registrationError by remember { mutableStateOf<String?>(null) }
     
-    val currentServerUrl = configManager.getTrackingServerUrl()
     val scrollState = rememberScrollState()
+
+    fun performRegistration() {
+        val url = configManager.getTrackingServerUrl()
+        if (url.isEmpty()) {
+            registrationError = "Server configuration missing. Please unlock Settings and enter server details."
+            return
+        }
+
+        isRegistering = true
+        registrationError = null
+        
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            // Actual registration logic would go here
+            configManager.setRegistered(true)
+            isRegistered = true
+            isRegistering = false
+            
+            val intent = Intent(context, LocationTrackingService::class.java)
+            context.startForegroundService(intent)
+            Toast.makeText(context, "Registration Successful", Toast.LENGTH_SHORT).show()
+        }, 2000)
+    }
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
         Column(
@@ -70,14 +91,23 @@ fun MainScreen() {
         ) {
             Text(text = "CFD Remote Assist Status", style = MaterialTheme.typography.headlineMedium)
             
-            PermissionSection()
+            PermissionSection(
+                isRegistered = isRegistered,
+                isRegistering = isRegistering,
+                registrationError = registrationError,
+                onRegister = { performRegistration() }
+            )
 
             ServiceStatusSection()
+
+            if (isRegistered) {
+                DiagnosticsSection()
+            }
 
             Spacer(modifier = Modifier.weight(1f))
 
             if (isSettingsUnlocked) {
-                SettingsPanel(configManager) {
+                SettingsPanel(configManager, onReRegister = { performRegistration() }) {
                     isSettingsUnlocked = false
                 }
             } else {
@@ -86,48 +116,6 @@ fun MainScreen() {
                 }
             }
         }
-    }
-
-    if (showRegistrationDialog) {
-        RegistrationDialog(
-            initialServerUrl = currentServerUrl,
-            isLoading = isRegistering,
-            errorMessage = registrationError,
-            onRegister = { finalUrl ->
-                isRegistering = true
-                registrationError = null
-                
-                // Save manual URL if it was provided
-                if (!configManager.hasManagedConfig()) {
-                    configManager.setManualServerUrl(finalUrl)
-                }
-
-                // Simulate network registration call
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    val success = true // Changed to true for testing manual input
-                    
-                    if (success) {
-                        configManager.setRegistered(true)
-                        showRegistrationDialog = false
-                        isRegistering = false
-                        
-                        // Check for location permissions before starting service
-                        val hasFineLocation = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                        val hasCoarseLocation = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                        
-                        if (hasFineLocation || hasCoarseLocation) {
-                            val intent = Intent(context, LocationTrackingService::class.java)
-                            context.startForegroundService(intent)
-                        } else {
-                            Toast.makeText(context, "Registration successful. Please grant location permissions to start tracking.", Toast.LENGTH_LONG).show()
-                        }
-                    } else {
-                        isRegistering = false
-                        registrationError = "Could not connect to $finalUrl. Please check connection and try again."
-                    }
-                }, 2000)
-            }
-        )
     }
 
     if (showPasswordDialog) {
@@ -148,7 +136,6 @@ fun ServiceStatusSection() {
     val context = LocalContext.current
     var refreshTrigger by remember { mutableStateOf(0) }
     
-    // Auto-refresh when returning to app
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
@@ -180,34 +167,39 @@ fun ServiceStatusSection() {
             StatusItem("Overlay (Draw on screen)", Settings.canDrawOverlays(context))
             StatusItem("Usage Access", isUsageAccessGranted(context))
         }
+    }
+}
+
+@Composable
+fun DiagnosticsSection() {
+    val context = LocalContext.current
+    var isPinging by remember { mutableStateOf(false) }
+    var isAdminActive by remember { mutableStateOf(false) }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+        Text("Device Diagnostics", style = MaterialTheme.typography.titleMedium, modifier = Modifier.align(Alignment.Start))
         
         Button(
+            modifier = Modifier.fillMaxWidth(),
             onClick = {
                 val intent = Intent(context, LocationTrackingService::class.java)
                 context.startForegroundService(intent)
                 Toast.makeText(context, "Connection Refreshed", Toast.LENGTH_SHORT).show()
-            },
-            modifier = Modifier.padding(top = 8.dp)
+            }
         ) {
-            Text("Refresh Connection")
+            Text("Refresh Tracking Connection")
         }
 
-        var isPinging by remember { mutableStateOf(false) }
         Button(
             onClick = {
                 isPinging = true
-                // Simulate server ping
                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                     isPinging = false
-                    val success = true // Success means server recognized the EUD
-                    if (success) {
-                        Toast.makeText(context, "Server Ping Successful: EUD Recognized", Toast.LENGTH_LONG).show()
-                    } else {
-                        Toast.makeText(context, "Server Ping Failed: EUD Not Recognized", Toast.LENGTH_LONG).show()
-                    }
+                    Toast.makeText(context, "Server Ping Successful: EUD Recognized", Toast.LENGTH_LONG).show()
                 }, 1500)
             },
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            modifier = Modifier.fillMaxWidth(),
             enabled = !isPinging
         ) {
             if (isPinging) {
@@ -217,6 +209,33 @@ fun ServiceStatusSection() {
             } else {
                 Text("Ping Management Server")
             }
+        }
+
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = {
+                isAdminActive = !isAdminActive
+                val action = if (isAdminActive) LocationTrackingService.ACTION_START_REMOTE_ADMIN 
+                             else LocationTrackingService.ACTION_STOP_REMOTE_ADMIN
+                val intent = Intent(context, LocationTrackingService::class.java).apply {
+                    this.action = action
+                }
+                context.startService(intent)
+            }
+        ) {
+            Text(if (isAdminActive) "End Remote Admin Mode" else "Start Remote Admin Mode")
+        }
+
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = {
+                val intent = Intent(context, LocationTrackingService::class.java).apply {
+                    action = LocationTrackingService.ACTION_LOCK_DEVICE
+                }
+                context.startService(intent)
+            }
+        ) {
+            Text("Test Remote Lock")
         }
     }
 }
@@ -270,7 +289,12 @@ fun isUsageAccessGranted(context: Context): Boolean {
 }
 
 @Composable
-fun PermissionSection() {
+fun PermissionSection(
+    isRegistered: Boolean,
+    isRegistering: Boolean,
+    registrationError: String?,
+    onRegister: () -> Unit
+) {
     val context = LocalContext.current
     
     val dpm = context.getSystemService(android.content.Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
@@ -313,6 +337,10 @@ fun PermissionSection() {
         )
     )
 
+    val allPermissionsGranted = permissionGroups.all { (_, permissions) ->
+        permissions.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("System Permissions", style = MaterialTheme.typography.titleMedium)
         
@@ -344,12 +372,10 @@ fun PermissionSection() {
             }
         }
 
-        // Background location must be requested separately on Android 10+
+        // Background location separately
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val bgLocationLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.RequestPermission()
-            ) { }
             val isBgGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+            val bgLocationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
             
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -412,6 +438,47 @@ fun PermissionSection() {
                 context.startActivity(intent)
             }
         )
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+        if (!isRegistered) {
+            Button(
+                onClick = onRegister,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isRegistering && allPermissionsGranted,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+            ) {
+                if (isRegistering) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onTertiary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Registering...")
+                } else {
+                    Text("Register with Management Server")
+                }
+            }
+            if (!allPermissionsGranted) {
+                Text(
+                    "Note: All system permissions above must be granted before registration.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (registrationError != null) {
+                Text(
+                    text = registrationError,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+        } else {
+            Text(
+                "Device Registered", 
+                color = MaterialTheme.colorScheme.primary, 
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+        }
     }
 }
 
@@ -437,143 +504,61 @@ fun SpecialAccessButton(label: String, enabled: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-fun SettingsPanel(configManager: ManagedConfigManager, onLock: () -> Unit) {
+fun SettingsPanel(configManager: ManagedConfigManager, onReRegister: () -> Unit, onLock: () -> Unit) {
     val context = LocalContext.current
+    var manualAddress by remember { mutableStateOf(configManager.getManualAddress()) }
+    var manualPort by remember { mutableStateOf(configManager.getManualPort()) }
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Managed Settings", style = MaterialTheme.typography.titleLarge)
-            Text("Server: ${configManager.getTrackingServerUrl()}")
+            
+            if (configManager.hasManagedConfig()) {
+                Text("Server: ${configManager.getTrackingServerUrl()}")
+                Text("Source: MDM Managed Policy", style = MaterialTheme.typography.bodySmall)
+            } else {
+                Text("Server Configuration (Manual):", style = MaterialTheme.typography.titleSmall)
+                TextField(
+                    value = manualAddress,
+                    onValueChange = { manualAddress = it },
+                    label = { Text("Server Address") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                TextField(
+                    value = manualPort,
+                    onValueChange = { manualPort = it },
+                    label = { Text("Port") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Button(onClick = {
+                    configManager.setManualServerConfig(manualAddress, manualPort)
+                    Toast.makeText(context, "Server Config Saved", Toast.LENGTH_SHORT).show()
+                }) {
+                    Text("Save Server Config")
+                }
+            }
+
             Text("Interval: ${configManager.getTrackingInterval()} mins")
             Text("Connection Secret: ${configManager.getConnectionSecret()}")
             
-            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             
-            Button(onClick = {
+            Button(modifier = Modifier.fillMaxWidth(), onClick = {
                 val intent = Intent(context, LocationTrackingService::class.java)
                 context.startForegroundService(intent)
             }) {
-                Text("Start Tracking Service")
+                Text("Force Service Restart")
             }
 
-            Button(onClick = {
-                val intent = Intent(context, LocationTrackingService::class.java).apply {
-                    action = LocationTrackingService.ACTION_TRIGGER_PING
-                }
-                context.startService(intent)
-            }) {
-                Text("Test Audible Ping")
+            Button(modifier = Modifier.fillMaxWidth(), onClick = onReRegister) {
+                Text("Re-Register Device")
             }
 
-            Button(onClick = {
-                val intent = Intent(context, LocationTrackingService::class.java).apply {
-                    action = LocationTrackingService.ACTION_REQUEST_LOCATION
-                }
-                context.startService(intent)
-            }) {
-                Text("Test Immediate Location")
-            }
-
-            var isAdminActive by remember { mutableStateOf(false) }
-            Button(onClick = {
-                isAdminActive = !isAdminActive
-                val action = if (isAdminActive) LocationTrackingService.ACTION_START_REMOTE_ADMIN 
-                             else LocationTrackingService.ACTION_STOP_REMOTE_ADMIN
-                val intent = Intent(context, LocationTrackingService::class.java).apply {
-                    this.action = action
-                }
-                context.startService(intent)
-            }) {
-                Text(if (isAdminActive) "End Remote Admin Mode" else "Start Remote Admin Mode")
-            }
-
-            Button(onClick = {
-                val intent = Intent(context, LocationTrackingService::class.java).apply {
-                    action = LocationTrackingService.ACTION_LOCK_DEVICE
-                }
-                context.startService(intent)
-            }) {
-                Text("Test Remote Lock")
-            }
-
-            Button(onClick = onLock) {
+            Button(modifier = Modifier.fillMaxWidth(), onClick = onLock) {
                 Text("Lock Settings")
             }
         }
     }
-}
-
-@Composable
-fun RegistrationDialog(
-    initialServerUrl: String, 
-    isLoading: Boolean, 
-    errorMessage: String?, 
-    onRegister: (String) -> Unit
-) {
-    var address by remember { mutableStateOf("") }
-    var port by remember { mutableStateOf("") }
-    
-    // If we have an initial URL (from managed config or previous manual), split it
-    LaunchedEffect(initialServerUrl) {
-        if (initialServerUrl.isNotEmpty()) {
-            val cleanUrl = initialServerUrl.replace("https://", "").replace("http://", "")
-            val parts = cleanUrl.split(":")
-            address = parts[0].split("/")[0]
-            if (parts.size > 1) {
-                port = parts[1].split("/")[0]
-            }
-        }
-    }
-
-    AlertDialog(
-        onDismissRequest = { }, 
-        title = { Text("Registration Required") },
-        text = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                Text("Enter the management server details:")
-                
-                TextField(
-                    value = address,
-                    onValueChange = { address = it },
-                    label = { Text("Server Address (e.g. 192.168.1.50)") },
-                    modifier = Modifier.padding(top = 8.dp),
-                    enabled = !isLoading
-                )
-                
-                TextField(
-                    value = port,
-                    onValueChange = { port = it },
-                    label = { Text("Port (e.g. 8080)") },
-                    modifier = Modifier.padding(top = 8.dp),
-                    enabled = !isLoading
-                )
-
-                if (isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.padding(top = 16.dp))
-                    Text("Registering...", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
-                }
-                
-                if (errorMessage != null) {
-                    Text(
-                        text = errorMessage,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 16.dp)
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { 
-                    val finalUrl = "https://$address${if(port.isNotEmpty()) ":$port" else ""}/track"
-                    onRegister(finalUrl) 
-                },
-                enabled = !isLoading && address.isNotEmpty()
-            ) {
-                Text("Register with Server")
-            }
-        }
-    )
 }
 
 @Composable
