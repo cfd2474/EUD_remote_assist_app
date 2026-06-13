@@ -50,6 +50,7 @@ dependencies {
     implementation(libs.google.play.services.location)
     implementation(libs.androidx.lifecycle.service)
     implementation(libs.okhttp)
+    implementation(libs.google.webrtc)
     implementation(libs.gson)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

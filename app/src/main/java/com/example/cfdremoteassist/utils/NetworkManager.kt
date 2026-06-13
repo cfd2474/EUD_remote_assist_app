@@ -164,6 +164,7 @@ class NetworkManager(private val context: Context, private val configManager: Ma
                     val json = gson.fromJson(text, JsonObject::class.java)
                     when (json.get("type")?.asString) {
                         "auth_ok" -> Log.i("NetworkManager", "WS Auth Successful")
+                        "webrtc" -> onCommand("WEBRTC_SIGNAL:$text")
                         "command" -> {
                             val cmd = json.get("command")?.asString
                             val incomingSecret = json.get("connection_secret")?.asString
@@ -193,6 +194,10 @@ class NetworkManager(private val context: Context, private val configManager: Ma
     fun disconnectWebSocket() {
         webSocket?.close(1000, "App Service Stopping")
         webSocket = null
+    }
+
+    fun sendWebSocketMessage(json: String) {
+        webSocket?.send(json)
     }
 
     fun pollCommands(callback: (List<String>) -> Unit) {

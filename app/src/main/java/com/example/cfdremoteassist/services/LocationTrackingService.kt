@@ -31,6 +31,7 @@ import android.os.*
 import android.provider.Settings
 import android.telephony.TelephonyManager
 import android.util.Log
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.example.cfdremoteassist.receivers.RemoteAssistDeviceAdminReceiver
 import com.example.cfdremoteassist.utils.ManagedConfigManager
@@ -143,6 +144,16 @@ class LocationTrackingService : Service() {
     }
 
     private fun handleRemoteCommand(command: String) {
+        if (command.startsWith("WEBRTC_SIGNAL:")) {
+            val signalJson = command.removePrefix("WEBRTC_SIGNAL:")
+            val intent = Intent(this, ScreenShareService::class.java).apply {
+                action = ScreenShareService.ACTION_PROCESS_SIGNAL
+                putExtra(ScreenShareService.EXTRA_SIGNAL, signalJson)
+            }
+            startService(intent)
+            return
+        }
+
         val intent = Intent(this, LocationTrackingService::class.java).apply {
             action = when (command) {
                 "TRIGGER_PING" -> ACTION_TRIGGER_PING
@@ -252,11 +263,17 @@ class LocationTrackingService : Service() {
         } else {
             startService(intent)
         }
+        
+        // Auto-trigger screen capture request on UI thread
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            Toast.makeText(this, "Remote Admin: Requesting Screen Share Permission", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun stopRemoteAdminIndicators() {
         Log.d("LocationTracking", "Stopping remote admin indicators")
         stopService(Intent(this, OverlayService::class.java))
+        stopService(Intent(this, ScreenShareService::class.java))
     }
 
     private fun lockDeviceNow() {

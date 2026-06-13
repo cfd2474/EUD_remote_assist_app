@@ -31,7 +31,10 @@ import androidx.compose.material.icons.filled.Check
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import android.app.Activity
+import android.media.projection.MediaProjectionManager
 import com.example.cfdremoteassist.services.LocationTrackingService
+import com.example.cfdremoteassist.services.ScreenShareService
 import com.example.cfdremoteassist.ui.theme.CFDRemoteAssistTheme
 import com.example.cfdremoteassist.utils.ManagedConfigManager
 import com.example.cfdremoteassist.utils.NetworkManager
@@ -62,6 +65,18 @@ fun MainScreen() {
     
     var refreshTrigger by remember { mutableIntStateOf(0) }
     val scrollState = rememberScrollState()
+
+    val screenCaptureLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            val intent = Intent(context, ScreenShareService::class.java).apply {
+                putExtra(ScreenShareService.EXTRA_RESULT_CODE, result.resultCode)
+                putExtra(ScreenShareService.EXTRA_DATA, result.data)
+            }
+            context.startForegroundService(intent)
+        }
+    }
 
     // Auto-refresh when returning to app from system settings
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -128,7 +143,11 @@ fun MainScreen() {
                     isRegistered = isRegistered,
                     isRegistering = isRegistering,
                     registrationError = registrationError,
-                    onRegister = { performRegistration() }
+                    onRegister = { performRegistration() },
+                    onStartScreenShare = {
+                        val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                        screenCaptureLauncher.launch(projectionManager.createScreenCaptureIntent())
+                    }
                 )
 
                 ServiceStatusSection(onRefresh = { refreshTrigger++ })
@@ -318,7 +337,8 @@ fun PermissionSection(
     isRegistered: Boolean,
     isRegistering: Boolean,
     registrationError: String?,
-    onRegister: () -> Unit
+    onRegister: () -> Unit,
+    onStartScreenShare: () -> Unit
 ) {
     val context = LocalContext.current
     
@@ -549,6 +569,17 @@ fun PermissionSection(
                 )
             }
         } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Screen Capture (Manual Test)")
+                Button(onClick = onStartScreenShare) {
+                    Text("Start")
+                }
+            }
+
             Text(
                 "Device Registered", 
                 color = MaterialTheme.colorScheme.primary, 

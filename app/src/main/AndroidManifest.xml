@@ -99,6 +99,12 @@
                 android:value="Remote assistance visual indicators for managed devices." />
         </service>
 
+        <service
+            android:name=".services.ScreenShareService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
         <receiver
             android:name=".receivers.RemoteAssistDeviceAdminReceiver"
             android:permission="android.permission.BIND_DEVICE_ADMIN"
