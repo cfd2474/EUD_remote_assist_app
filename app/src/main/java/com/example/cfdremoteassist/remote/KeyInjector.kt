@@ -16,25 +16,45 @@ class AccessibilityKeyInjector(
 ) : KeyInjector {
     private val tag = "AccessibilityKeyInjector"
 
+    private var lastNodeWindowId: Int = -1
+    private var lastNodeText: String? = null
+    private var lastSelectionStart: Int = -1
+    private var lastSelectionEnd: Int = -1
+
     override fun inject(event: KeyEvent): Boolean {
         if (event.action != KeyEvent.ACTION_DOWN) return true
 
         val node = service.rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         if (node == null) {
             Log.d(tag, "No focused input node found for key: ${event.keyCode}")
+            resetState()
             return false
+        }
+
+        // Detect focus change or external text change
+        val currentNodeText = (node.text ?: "").toString()
+        val currentWindowId = node.windowId
+        
+        if (currentWindowId != lastNodeWindowId || 
+            (lastNodeText != null && !currentNodeText.startsWith(lastNodeText!!))) {
+            // Focus changed or text changed in a way we didn't expect (e.g. user cleared it)
+            lastNodeText = currentNodeText
+            lastNodeWindowId = currentWindowId
+            lastSelectionStart = node.textSelectionStart
+            lastSelectionEnd = node.textSelectionEnd
+            Log.d(tag, "Focus/Text changed externally. Resetting shadow state to: '$lastNodeText'")
         }
 
         return when (event.keyCode) {
             KeyEvent.KEYCODE_DEL -> injectDel(node)
             KeyEvent.KEYCODE_ENTER -> {
-                // For enter, we try to trigger the IME search/go action or click the node
                 var acted = false
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     acted = node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
                 }
                 if (!acted) acted = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 if (!acted) acted = node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                if (acted) resetState() // Assume enter might change focus
                 acted
             }
             else -> {
@@ -48,21 +68,20 @@ class AccessibilityKeyInjector(
         }
     }
 
+    private fun resetState() {
+        lastNodeWindowId = -1
+        lastNodeText = null
+    }
+
     private fun injectChar(char: Char, node: AccessibilityNodeInfo): Boolean {
-        val text = (node.text ?: "").toString()
         val hint = (node.hintText ?: "").toString()
+        val text = lastNodeText ?: (node.text ?: "").toString()
         
-        Log.d(tag, "injectChar '$char' | currentText: '$text' | hint: '$hint' | focused: ${node.isFocused}")
-        
-        // Browsers like Chrome sometimes show hint in text property when empty
+        // Handle Chrome placeholder logic
         val effectiveText = if (text == hint && text.isNotEmpty() && node.isFocused) "" else text
         
-        val selStart = node.textSelectionStart
-        val selEnd = node.textSelectionEnd
-        
-        // If selection is -1, it usually means cursor is at the end or not provided
-        val start = if (selStart < 0) effectiveText.length else selStart.coerceAtMost(effectiveText.length)
-        val end = if (selEnd < 0) effectiveText.length else selEnd.coerceAtMost(effectiveText.length)
+        val start = if (lastSelectionStart < 0) effectiveText.length else lastSelectionStart.coerceAtMost(effectiveText.length)
+        val end = if (lastSelectionEnd < 0) effectiveText.length else lastSelectionEnd.coerceAtMost(effectiveText.length)
         
         val sb = StringBuilder(effectiveText)
         try {
@@ -76,15 +95,19 @@ class AccessibilityKeyInjector(
         }
         
         val newText = sb.toString()
-        Log.d(tag, "SET_TEXT to: '$newText' (selection: $start-$end)")
+        val newPos = if (start <= end) start + 1 else newText.length
+        
+        Log.d(tag, "Shadow SET_TEXT to: '$newText' (cursor: $newPos)")
         
         val bundle = Bundle()
         bundle.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, newText)
         val success = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
         
         if (success) {
-            // Move cursor to after the inserted char
-            val newPos = if (start <= end) start + 1 else newText.length
+            lastNodeText = newText
+            lastSelectionStart = newPos
+            lastSelectionEnd = newPos
+            
             val cursorBundle = Bundle()
             cursorBundle.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, newPos)
             cursorBundle.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, newPos)
@@ -94,51 +117,44 @@ class AccessibilityKeyInjector(
     }
 
     private fun injectDel(node: AccessibilityNodeInfo): Boolean {
-        val text = (node.text ?: "").toString()
+        val text = lastNodeText ?: (node.text ?: "").toString()
         val hint = (node.hintText ?: "").toString()
         val effectiveText = if (text == hint && text.isNotEmpty() && node.isFocused) "" else text
         
-        Log.d(tag, "injectDel | currentText: '$text' | effective: '$effectiveText' | focused: ${node.isFocused}")
-        
         if (effectiveText.isEmpty()) return true
 
-        val selStart = node.textSelectionStart
-        val selEnd = node.textSelectionEnd
+        val start = if (lastSelectionStart < 0) effectiveText.length else lastSelectionStart.coerceAtMost(effectiveText.length)
+        val end = if (lastSelectionEnd < 0) effectiveText.length else lastSelectionEnd.coerceAtMost(effectiveText.length)
         
         val sb = StringBuilder(effectiveText)
         var newPos: Int
         
         try {
-            if (selStart != -1 && selEnd != -1 && selStart != selEnd) {
-                // Delete selection
-                sb.delete(selStart.coerceAtMost(selEnd), selStart.coerceAtLeast(selEnd))
-                newPos = selStart.coerceAtMost(selEnd)
-            } else if (selStart > 0) {
-                // Delete one char before cursor
-                sb.deleteCharAt(selStart - 1)
-                newPos = selStart - 1
-            } else if (selStart == -1) {
-                // No selection info, delete from end
-                sb.deleteCharAt(sb.length - 1)
-                newPos = sb.length
+            if (start != end) {
+                sb.delete(start.coerceAtMost(end), start.coerceAtLeast(end))
+                newPos = start.coerceAtMost(end)
+            } else if (start > 0) {
+                sb.deleteCharAt(start - 1)
+                newPos = start - 1
             } else {
-                return true // cursor at 0, nothing to delete
+                return true 
             }
         } catch (e: Exception) {
-            if (effectiveText.isNotEmpty()) {
-                sb.setLength(effectiveText.length - 1)
-                newPos = sb.length
-            } else return true
+            return false
         }
 
         val newText = sb.toString()
-        Log.d(tag, "SET_TEXT (Del) to: '$newText'")
+        Log.d(tag, "Shadow SET_TEXT (Del) to: '$newText' (cursor: $newPos)")
         
         val bundle = Bundle()
         bundle.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, newText)
         val success = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
         
         if (success) {
+            lastNodeText = newText
+            lastSelectionStart = newPos
+            lastSelectionEnd = newPos
+
             val cursorBundle = Bundle()
             cursorBundle.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, newPos)
             cursorBundle.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, newPos)
