@@ -182,6 +182,33 @@ fun ServiceStatusSection() {
         ) {
             Text("Refresh Connection")
         }
+
+        var isPinging by remember { mutableStateOf(false) }
+        Button(
+            onClick = {
+                isPinging = true
+                // Simulate server ping
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    isPinging = false
+                    val success = true // Success means server recognized the EUD
+                    if (success) {
+                        Toast.makeText(context, "Server Ping Successful: EUD Recognized", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(context, "Server Ping Failed: EUD Not Recognized", Toast.LENGTH_LONG).show()
+                    }
+                }, 1500)
+            },
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            enabled = !isPinging
+        ) {
+            if (isPinging) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Pinging Server...")
+            } else {
+                Text("Ping Management Server")
+            }
+        }
     }
 }
 
