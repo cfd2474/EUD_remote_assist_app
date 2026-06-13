@@ -283,14 +283,6 @@ class ScreenShareService : Service() {
                             Log.d("ScreenShare", "Received ${messages.size} signaling messages via HTTP poll")
                             messages.forEach { handleSignalingJsonObject(it) }
                         }
-                    } else {
-                        Log.d("ScreenShare", "Already capturing, re-signaling WEBRTC_READY")
-                        if (firstFrameCaptured) {
-                            val readyJson = JsonObject().apply {
-                                addProperty("type", "webrtc_ready")
-                            }
-                            networkManager.sendWebSocketMessage(gson.toJson(readyJson))
-                        }
                     }
                 }
                 pollHandler.postDelayed(this, 2000) // Poll every 2 seconds during active session
