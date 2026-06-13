@@ -3,6 +3,7 @@ package com.example.cfdremoteassist.remote
 import android.accessibilityservice.AccessibilityService
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -20,6 +21,8 @@ class AccessibilityKeyInjector(
     private var lastNodeText: String? = null
     private var lastSelectionStart: Int = -1
     private var lastSelectionEnd: Int = -1
+    private var lastActionTime: Long = 0
+    private var lastFocusedNode: AccessibilityNodeInfo? = null
 
     override fun inject(event: KeyEvent): Boolean {
         if (event.action != KeyEvent.ACTION_DOWN) return true
@@ -31,19 +34,30 @@ class AccessibilityKeyInjector(
             return false
         }
 
-        // Detect focus change or external text change
-        val currentNodeText = (node.text ?: "").toString()
+        val now = SystemClock.uptimeMillis()
         val currentWindowId = node.windowId
+        val currentNodeText = (node.text ?: "").toString()
+
+        // Sync Logic:
+        // 1. If window or node changed, we MUST sync.
+        // 2. If it's been more than 1.5s since we typed, we sync to capture external changes.
+        // 3. Otherwise, we TRUST our shadow buffer to allow high-speed typing.
+        val nodeChanged = lastFocusedNode != node
+        val timeoutExpired = now - lastActionTime > 1500
         
-        if (currentWindowId != lastNodeWindowId || 
-            (lastNodeText != null && !currentNodeText.startsWith(lastNodeText!!))) {
-            // Focus changed or text changed in a way we didn't expect (e.g. user cleared it)
+        if (lastNodeText == null || currentWindowId != lastNodeWindowId || nodeChanged || timeoutExpired) {
+            if (nodeChanged || timeoutExpired) {
+                Log.d(tag, "Syncing shadow state (Reason: nodeChanged=$nodeChanged, timeout=$timeoutExpired)")
+            }
             lastNodeText = currentNodeText
             lastNodeWindowId = currentWindowId
             lastSelectionStart = node.textSelectionStart
             lastSelectionEnd = node.textSelectionEnd
-            Log.d(tag, "Focus/Text changed externally. Resetting shadow state to: '$lastNodeText'")
+            lastFocusedNode?.recycle()
+            lastFocusedNode = AccessibilityNodeInfo.obtain(node)
         }
+
+        lastActionTime = now
 
         return when (event.keyCode) {
             KeyEvent.KEYCODE_DEL -> injectDel(node)
@@ -54,7 +68,7 @@ class AccessibilityKeyInjector(
                 }
                 if (!acted) acted = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 if (!acted) acted = node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-                if (acted) resetState() // Assume enter might change focus
+                if (acted) resetState() 
                 acted
             }
             else -> {
@@ -71,33 +85,35 @@ class AccessibilityKeyInjector(
     private fun resetState() {
         lastNodeWindowId = -1
         lastNodeText = null
+        lastFocusedNode?.recycle()
+        lastFocusedNode = null
     }
 
     private fun injectChar(char: Char, node: AccessibilityNodeInfo): Boolean {
+        val text = lastNodeText ?: ""
         val hint = (node.hintText ?: "").toString()
-        val text = lastNodeText ?: (node.text ?: "").toString()
         
-        // Handle Chrome placeholder logic
-        val effectiveText = if (text == hint && text.isNotEmpty() && node.isFocused) "" else text
+        // Handle Chrome placeholder logic: if text equals hint and field is focused, treat as empty
+        val effectiveText = if (text == hint && text.isNotEmpty()) "" else text
         
         val start = if (lastSelectionStart < 0) effectiveText.length else lastSelectionStart.coerceAtMost(effectiveText.length)
         val end = if (lastSelectionEnd < 0) effectiveText.length else lastSelectionEnd.coerceAtMost(effectiveText.length)
         
         val sb = StringBuilder(effectiveText)
         try {
-            if (start <= end) {
+            if (start != end) {
                 sb.replace(start, end, char.toString())
             } else {
-                sb.append(char)
+                sb.insert(start, char)
             }
         } catch (e: Exception) {
             sb.append(char)
         }
         
         val newText = sb.toString()
-        val newPos = if (start <= end) start + 1 else newText.length
+        val newPos = start + 1
         
-        Log.d(tag, "Shadow SET_TEXT to: '$newText' (cursor: $newPos)")
+        Log.d(tag, "Shadow SET_TEXT to: '$newText' (cursor: $newPos, prev: '$text')")
         
         val bundle = Bundle()
         bundle.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, newText)
@@ -108,6 +124,7 @@ class AccessibilityKeyInjector(
             lastSelectionStart = newPos
             lastSelectionEnd = newPos
             
+            // Move cursor - critical for Chrome address bar
             val cursorBundle = Bundle()
             cursorBundle.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, newPos)
             cursorBundle.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, newPos)
@@ -117,16 +134,13 @@ class AccessibilityKeyInjector(
     }
 
     private fun injectDel(node: AccessibilityNodeInfo): Boolean {
-        val text = lastNodeText ?: (node.text ?: "").toString()
-        val hint = (node.hintText ?: "").toString()
-        val effectiveText = if (text == hint && text.isNotEmpty() && node.isFocused) "" else text
-        
-        if (effectiveText.isEmpty()) return true
+        val text = lastNodeText ?: ""
+        if (text.isEmpty()) return true
 
-        val start = if (lastSelectionStart < 0) effectiveText.length else lastSelectionStart.coerceAtMost(effectiveText.length)
-        val end = if (lastSelectionEnd < 0) effectiveText.length else lastSelectionEnd.coerceAtMost(effectiveText.length)
+        val start = if (lastSelectionStart < 0) text.length else lastSelectionStart.coerceAtMost(text.length)
+        val end = if (lastSelectionEnd < 0) text.length else lastSelectionEnd.coerceAtMost(text.length)
         
-        val sb = StringBuilder(effectiveText)
+        val sb = StringBuilder(text)
         var newPos: Int
         
         try {
@@ -144,7 +158,7 @@ class AccessibilityKeyInjector(
         }
 
         val newText = sb.toString()
-        Log.d(tag, "Shadow SET_TEXT (Del) to: '$newText' (cursor: $newPos)")
+        Log.d(tag, "Shadow SET_TEXT (Del) to: '$newText' (cursor: $newPos, prev: '$text')")
         
         val bundle = Bundle()
         bundle.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, newText)
