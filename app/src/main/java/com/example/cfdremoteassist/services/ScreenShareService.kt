@@ -368,15 +368,19 @@ class ScreenShareService : Service() {
                                 Log.d("ScreenShare", "Remote Description Set")
                                 
                                 // Requirement: Add track only after receiving offer
-                                Log.d("ScreenShare", "Associating local video track to Transceiver (Post-Offer)")
-                                val videoTransceiver = peerConnection?.transceivers?.find { 
-                                    it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO 
-                                }
-                                if (videoTransceiver != null) {
-                                    videoTransceiver.sender.setTrack(localVideoTrack, true)
-                                    videoTransceiver.direction = RtpTransceiver.RtpTransceiverDirection.SEND_ONLY
-                                } else {
-                                    peerConnection?.addTrack(localVideoTrack, listOf("stream0"))
+                                try {
+                                    Log.d("ScreenShare", "Associating local video track to Transceiver (Post-Offer)")
+                                    val videoTransceiver = peerConnection?.transceivers?.find { 
+                                        it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO 
+                                    }
+                                    if (videoTransceiver != null) {
+                                        videoTransceiver.sender.setTrack(localVideoTrack, true)
+                                        videoTransceiver.direction = RtpTransceiver.RtpTransceiverDirection.SEND_ONLY
+                                    } else {
+                                        peerConnection?.addTrack(localVideoTrack, listOf("stream0"))
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("ScreenShare", "Error adding track: ${e.message}")
                                 }
 
                                 peerConnection?.createAnswer(object : SimpleSdpObserver() {
