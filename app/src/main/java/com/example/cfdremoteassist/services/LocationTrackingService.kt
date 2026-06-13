@@ -19,6 +19,14 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.graphics.Color
+import android.graphics.PixelFormat
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.os.*
 import android.provider.Settings
 import android.telephony.TelephonyManager
@@ -41,6 +49,7 @@ class LocationTrackingService : Service() {
 
     private var ringtone: Ringtone? = null
     private var originalVolume: Int = -1
+    private var pingOverlayView: View? = null
     private val handler = Handler(Looper.getMainLooper())
     private var stopPingRunnable: Runnable? = null
     
@@ -339,11 +348,60 @@ class LocationTrackingService : Service() {
             play()
         }
 
+        showPingPopup()
+
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(1, createNotification(isPingActive = true))
 
         stopPingRunnable = Runnable { stopAudiblePing() }
         handler.postDelayed(stopPingRunnable!!, TimeUnit.MINUTES.toMillis(2))
+    }
+
+    private fun showPingPopup() {
+        if (pingOverlayView != null) return
+
+        val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+            PixelFormat.TRANSLUCENT
+        )
+        params.gravity = Gravity.CENTER
+
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.WHITE)
+            setPadding(40, 40, 40, 40)
+            elevation = 20f
+        }
+
+        val textView = TextView(this).apply {
+            text = "Locating Phone"
+            setTextColor(Color.BLACK)
+            textSize = 20f
+            setPadding(0, 0, 0, 30)
+            gravity = Gravity.CENTER
+        }
+
+        val button = Button(this).apply {
+            text = "Acknowledge"
+            setOnClickListener {
+                stopAudiblePing()
+            }
+        }
+
+        layout.addView(textView)
+        layout.addView(button)
+
+        pingOverlayView = layout
+        try {
+            wm.addView(pingOverlayView, params)
+        } catch (e: Exception) {
+            Log.e("LocationTracking", "Failed to add ping overlay", e)
+            pingOverlayView = null
+        }
     }
 
     private fun stopAudiblePing() {
@@ -357,6 +415,14 @@ class LocationTrackingService : Service() {
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             audioManager.setStreamVolume(AudioManager.STREAM_RING, originalVolume, 0)
             originalVolume = -1
+        }
+
+        pingOverlayView?.let {
+            val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            try {
+                wm.removeView(it)
+            } catch (e: Exception) {}
+            pingOverlayView = null
         }
 
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
