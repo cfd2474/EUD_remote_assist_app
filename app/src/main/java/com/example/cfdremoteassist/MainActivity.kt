@@ -28,6 +28,9 @@ import androidx.core.content.ContextCompat
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Check
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.cfdremoteassist.services.LocationTrackingService
 import com.example.cfdremoteassist.ui.theme.CFDRemoteAssistTheme
 import com.example.cfdremoteassist.utils.ManagedConfigManager
@@ -55,7 +58,22 @@ fun MainScreen() {
     var isRegistering by remember { mutableStateOf(false) }
     var registrationError by remember { mutableStateOf<String?>(null) }
     
+    var refreshTrigger by remember { mutableIntStateOf(0) }
     val scrollState = rememberScrollState()
+
+    // Auto-refresh when returning to app from system settings
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshTrigger++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     fun performRegistration() {
         val url = configManager.getTrackingServerUrl()
@@ -68,7 +86,6 @@ fun MainScreen() {
         registrationError = null
         
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            // Actual registration logic would go here
             configManager.setRegistered(true)
             isRegistered = true
             isRegistering = false
@@ -91,17 +108,20 @@ fun MainScreen() {
         ) {
             Text(text = "CFD Remote Assist Status", style = MaterialTheme.typography.headlineMedium)
             
-            PermissionSection(
-                isRegistered = isRegistered,
-                isRegistering = isRegistering,
-                registrationError = registrationError,
-                onRegister = { performRegistration() }
-            )
+            // Wrap in key to force recomposition and permission re-check on refreshTrigger change
+            key(refreshTrigger) {
+                PermissionSection(
+                    isRegistered = isRegistered,
+                    isRegistering = isRegistering,
+                    registrationError = registrationError,
+                    onRegister = { performRegistration() }
+                )
 
-            ServiceStatusSection()
+                ServiceStatusSection(onRefresh = { refreshTrigger++ })
 
-            if (isRegistered) {
-                DiagnosticsSection()
+                if (isRegistered) {
+                    DiagnosticsSection()
+                }
             }
 
             Spacer(modifier = Modifier.weight(1f))
@@ -132,23 +152,9 @@ fun MainScreen() {
 }
 
 @Composable
-fun ServiceStatusSection() {
+fun ServiceStatusSection(onRefresh: () -> Unit) {
     val context = LocalContext.current
-    var refreshTrigger by remember { mutableStateOf(0) }
     
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                refreshTrigger++
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
     Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -156,17 +162,15 @@ fun ServiceStatusSection() {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Service Status:", style = MaterialTheme.typography.titleMedium)
-            IconButton(onClick = { refreshTrigger++ }) {
+            IconButton(onClick = onRefresh) {
                 Icon(imageVector = Icons.Default.Refresh, contentDescription = "Refresh")
             }
         }
         
-        key(refreshTrigger) {
-            StatusItem("Accessibility", isAccessibilityServiceEnabled(context))
-            StatusItem("Notification Listener", isNotificationServiceEnabled(context))
-            StatusItem("Overlay (Draw on screen)", Settings.canDrawOverlays(context))
-            StatusItem("Usage Access", isUsageAccessGranted(context))
-        }
+        StatusItem("Accessibility", isAccessibilityServiceEnabled(context))
+        StatusItem("Notification Listener", isNotificationServiceEnabled(context))
+        StatusItem("Overlay (Draw on screen)", Settings.canDrawOverlays(context))
+        StatusItem("Usage Access", isUsageAccessGranted(context))
     }
 }
 
@@ -244,12 +248,12 @@ fun DiagnosticsSection() {
 fun StatusItem(label: String, enabled: Boolean) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         val color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-        Box(modifier = Modifier.size(12.dp).padding(2.dp).padding(end = 4.dp)) // Placeholder for dot
+        Box(modifier = Modifier.size(12.dp).padding(2.dp).padding(end = 4.dp)) 
         Text(text = "$label: ${if (enabled) "Enabled" else "Disabled"}", color = color)
     }
 }
 
-fun isAccessibilityServiceEnabled(context: android.content.Context): Boolean {
+fun isAccessibilityServiceEnabled(context: Context): Boolean {
     val expectedId = android.content.ComponentName(context, com.example.cfdremoteassist.services.RemoteAssistAccessibilityService::class.java).flattenToString()
     val settingValue = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
     val colonSplitter = android.text.TextUtils.SimpleStringSplitter(':')
@@ -263,7 +267,7 @@ fun isAccessibilityServiceEnabled(context: android.content.Context): Boolean {
     return false
 }
 
-fun isNotificationServiceEnabled(context: android.content.Context): Boolean {
+fun isNotificationServiceEnabled(context: Context): Boolean {
     val pkgName = context.packageName
     val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
     return flat?.contains(pkgName) == true
@@ -297,7 +301,7 @@ fun PermissionSection(
 ) {
     val context = LocalContext.current
     
-    val dpm = context.getSystemService(android.content.Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
+    val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
     val adminComponent = android.content.ComponentName(context, com.example.cfdremoteassist.receivers.RemoteAssistDeviceAdminReceiver::class.java)
     val isDeviceAdminActive = dpm.isAdminActive(adminComponent)
 
@@ -330,13 +334,16 @@ fun PermissionSection(
         } else {
             arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
         },
-        "Notifications & Nearby" to arrayOf(
-            Manifest.permission.POST_NOTIFICATIONS,
-            Manifest.permission.BLUETOOTH_SCAN,
-            Manifest.permission.BLUETOOTH_CONNECT
-        )
+        "Notifications & Nearby" to mutableListOf<String>().apply {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                add(Manifest.permission.BLUETOOTH_SCAN)
+                add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+        }.toTypedArray()
     )
 
+    // Only count permissions that are actually relevant for the current API level
     val allPermissionsGranted = permissionGroups.all { (_, permissions) ->
         permissions.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
     }
@@ -345,29 +352,31 @@ fun PermissionSection(
         Text("System Permissions", style = MaterialTheme.typography.titleMedium)
         
         permissionGroups.forEach { (groupName, permissions) ->
-            val launcher = rememberLauncherForActivityResult(
-                ActivityResultContracts.RequestMultiplePermissions()
-            ) { results ->
-                val allGranted = results.values.all { it }
-                Toast.makeText(context, "$groupName: ${if (allGranted) "Granted" else "Check Permissions"}", Toast.LENGTH_SHORT).show()
-            }
-            
-            val isGranted = permissions.all { 
-                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED 
-            }
+            if (permissions.isNotEmpty()) {
+                val launcher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestMultiplePermissions()
+                ) { results ->
+                    val allGranted = results.values.all { it }
+                    Toast.makeText(context, "$groupName: ${if (allGranted) "Granted" else "Check Permissions"}", Toast.LENGTH_SHORT).show()
+                }
+                
+                val isGranted = permissions.all { 
+                    ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED 
+                }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(groupName)
-                Button(
-                    onClick = { launcher.launch(permissions) },
-                    colors = if (isGranted) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer) 
-                             else ButtonDefaults.buttonColors()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(if (isGranted) "Granted" else "Request")
+                    Text(groupName)
+                    Button(
+                        onClick = { launcher.launch(permissions) },
+                        colors = if (isGranted) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer) 
+                                 else ButtonDefaults.buttonColors()
+                    ) {
+                        Text(if (isGranted) "Granted" else "Request")
+                    }
                 }
             }
         }
@@ -514,7 +523,8 @@ fun SettingsPanel(configManager: ManagedConfigManager, onReRegister: () -> Unit,
             Text("Managed Settings", style = MaterialTheme.typography.titleLarge)
             
             if (configManager.hasManagedConfig()) {
-                Text("Server: ${configManager.getTrackingServerUrl()}")
+                val url = configManager.getTrackingServerUrl()
+                Text("Server: ${if (url.isEmpty()) "Not Configured" else url}")
                 Text("Source: MDM Managed Policy", style = MaterialTheme.typography.bodySmall)
             } else {
                 Text("Server Configuration (Manual):", style = MaterialTheme.typography.titleSmall)
@@ -546,6 +556,7 @@ fun SettingsPanel(configManager: ManagedConfigManager, onReRegister: () -> Unit,
             Button(modifier = Modifier.fillMaxWidth(), onClick = {
                 val intent = Intent(context, LocationTrackingService::class.java)
                 context.startForegroundService(intent)
+                Toast.makeText(context, "Service Restarted", Toast.LENGTH_SHORT).show()
             }) {
                 Text("Force Service Restart")
             }
