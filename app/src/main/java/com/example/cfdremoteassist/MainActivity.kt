@@ -21,6 +21,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import com.example.cfdremoteassist.services.LocationTrackingService
 import com.example.cfdremoteassist.ui.theme.CFDRemoteAssistTheme
 import com.example.cfdremoteassist.utils.ManagedConfigManager
@@ -136,12 +138,50 @@ fun MainScreen() {
 @Composable
 fun ServiceStatusSection() {
     val context = LocalContext.current
+    var refreshTrigger by remember { mutableStateOf(0) }
     
+    // Auto-refresh when returning to app
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                refreshTrigger++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
-        Text("Service Status:", style = MaterialTheme.typography.titleMedium)
-        StatusItem("Accessibility", isAccessibilityServiceEnabled(context))
-        StatusItem("Notification Listener", isNotificationServiceEnabled(context))
-        StatusItem("Overlay (Draw on screen)", Settings.canDrawOverlays(context))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Service Status:", style = MaterialTheme.typography.titleMedium)
+            IconButton(onClick = { refreshTrigger++ }) {
+                Icon(imageVector = Icons.Default.Refresh, contentDescription = "Refresh")
+            }
+        }
+        
+        key(refreshTrigger) {
+            StatusItem("Accessibility", isAccessibilityServiceEnabled(context))
+            StatusItem("Notification Listener", isNotificationServiceEnabled(context))
+            StatusItem("Overlay (Draw on screen)", Settings.canDrawOverlays(context))
+        }
+        
+        Button(
+            onClick = {
+                val intent = Intent(context, LocationTrackingService::class.java)
+                context.startForegroundService(intent)
+                Toast.makeText(context, "Connection Refreshed", Toast.LENGTH_SHORT).show()
+            },
+            modifier = Modifier.padding(top = 8.dp)
+        ) {
+            Text("Refresh Connection")
+        }
     }
 }
 
@@ -155,9 +195,17 @@ fun StatusItem(label: String, enabled: Boolean) {
 }
 
 fun isAccessibilityServiceEnabled(context: android.content.Context): Boolean {
-    val expectedComponentName = android.content.ComponentName(context, com.example.cfdremoteassist.services.RemoteAssistAccessibilityService::class.java)
-    val enabledServices = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
-    return enabledServices?.contains(expectedComponentName.flattenToString()) == true
+    val expectedId = android.content.ComponentName(context, com.example.cfdremoteassist.services.RemoteAssistAccessibilityService::class.java).flattenToString()
+    val settingValue = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
+    val colonSplitter = android.text.TextUtils.SimpleStringSplitter(':')
+    colonSplitter.setString(settingValue)
+    while (colonSplitter.hasNext()) {
+        val componentName = colonSplitter.next()
+        if (componentName.equals(expectedId, ignoreCase = true)) {
+            return true
+        }
+    }
+    return false
 }
 
 fun isNotificationServiceEnabled(context: android.content.Context): Boolean {

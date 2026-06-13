@@ -9,7 +9,7 @@ class ManagedConfigManager(context: Context) {
 
     fun getSettingsPassword(): String {
         val appRestrictions: Bundle = restrictionsManager.applicationRestrictions
-        return appRestrictions.getString("settings_password", "admin123")
+        return appRestrictions.getString("settings_password", "3757")
     }
 
     fun getConnectionSecret(): String {
