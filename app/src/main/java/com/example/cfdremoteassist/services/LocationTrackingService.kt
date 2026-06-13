@@ -224,15 +224,13 @@ class LocationTrackingService : Service() {
                     val y1 = json.get("y_percent")?.asFloat ?: 0f
                     val x2 = json.get("x2_percent")?.asFloat ?: 0f
                     val y2 = json.get("y2_percent")?.asFloat ?: 0f
-                    accessibilityService.performSwipe(x1, y1, x2, y2)
+                    val duration = json.get("duration_ms")?.asLong ?: 350L
+                    accessibilityService.performSwipe(x1, y1, x2, y2, duration)
                 }
                 "KEY" -> {
                     val key = json.get("key")?.asString ?: ""
-                    if (key.length == 1) {
-                        accessibilityService.performGlobalAction(key)
-                    } else {
-                        accessibilityService.performGlobalAction(key.uppercase())
-                    }
+                    val method = json.get("input_method")?.asString ?: "ime"
+                    accessibilityService.handleKeyAction(key, method)
                 }
             }
         } catch (e: Exception) {

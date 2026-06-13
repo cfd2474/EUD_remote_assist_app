@@ -9,6 +9,8 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.KeyEvent
 import android.os.Bundle
+import android.view.InputDevice
+import android.view.View
 
 class RemoteAssistAccessibilityService : AccessibilityService() {
 
@@ -106,25 +108,7 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
             moveTo(x, y)
         }
         val gestureBuilder = GestureDescription.Builder()
-        gestureBuilder.addStroke(GestureDescription.StrokeDescription(clickPath, 0, 100))
-        dispatchGesture(gestureBuilder.build(), null, null)
-    }
-
-    fun performSwipe(xPercent: Float, yPercent: Float, x2Percent: Float, y2Percent: Float) {
-        val metrics = resources.displayMetrics
-        val x1 = xPercent * metrics.widthPixels
-        val y1 = yPercent * metrics.heightPixels
-        val x2 = x2Percent * metrics.widthPixels
-        val y2 = yPercent * metrics.heightPixels
-        
-        Log.d("AccessibilityService", "Performing swipe from $x1,$y1 to $x2,$y2")
-        
-        val swipePath = Path().apply {
-            moveTo(x1, y1)
-            lineTo(x2, y2)
-        }
-        val gestureBuilder = GestureDescription.Builder()
-        gestureBuilder.addStroke(GestureDescription.StrokeDescription(swipePath, 0, 400))
+        gestureBuilder.addStroke(GestureDescription.StrokeDescription(clickPath, 0, 50))
         dispatchGesture(gestureBuilder.build(), null, null)
     }
 
@@ -139,44 +123,90 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
             moveTo(x, y)
         }
         val gestureBuilder = GestureDescription.Builder()
-        gestureBuilder.addStroke(GestureDescription.StrokeDescription(clickPath, 0, 1000))
+        gestureBuilder.addStroke(GestureDescription.StrokeDescription(clickPath, 0, 600))
         dispatchGesture(gestureBuilder.build(), null, null)
     }
 
-    fun performGlobalAction(action: String) {
-        Log.d("AccessibilityService", "Performing global action: $action")
-        when (action) {
-            "BACK" -> performGlobalAction(GLOBAL_ACTION_BACK)
-            "HOME" -> performGlobalAction(GLOBAL_ACTION_HOME)
-            "RECENTS" -> performGlobalAction(GLOBAL_ACTION_RECENTS)
-            "NOTIFICATIONS" -> performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
-            "QUICK_SETTINGS" -> performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)
-            "POWER_DIALOG" -> performGlobalAction(GLOBAL_ACTION_POWER_DIALOG)
-            "DPAD_UP" -> injectKey(KeyEvent.KEYCODE_DPAD_UP)
-            "DPAD_DOWN" -> injectKey(KeyEvent.KEYCODE_DPAD_DOWN)
-            "DPAD_LEFT" -> injectKey(KeyEvent.KEYCODE_DPAD_LEFT)
-            "DPAD_RIGHT" -> injectKey(KeyEvent.KEYCODE_DPAD_RIGHT)
-            "ENTER" -> injectKey(KeyEvent.KEYCODE_ENTER)
-            "DEL", "BACKSPACE" -> injectKey(KeyEvent.KEYCODE_DEL)
-            "SPACE" -> injectKey(KeyEvent.KEYCODE_SPACE)
+    fun performSwipe(x1Percent: Float, y1Percent: Float, x2Percent: Float, y2Percent: Float, durationMs: Long = 350) {
+        val metrics = resources.displayMetrics
+        val x1 = x1Percent * metrics.widthPixels
+        val y1 = y1Percent * metrics.heightPixels
+        val x2 = x2Percent * metrics.widthPixels
+        val y2 = y2Percent * metrics.heightPixels
+        
+        Log.d("AccessibilityService", "Performing swipe from $x1,$y1 to $x2,$y2 over ${durationMs}ms")
+        
+        val swipePath = Path().apply {
+            moveTo(x1, y1)
+            lineTo(x2, y2)
+        }
+        val gestureBuilder = GestureDescription.Builder()
+        gestureBuilder.addStroke(GestureDescription.StrokeDescription(swipePath, 0, durationMs))
+        dispatchGesture(gestureBuilder.build(), null, null)
+    }
+
+    fun handleKeyAction(key: String, inputMethod: String?) {
+        Log.d("AccessibilityService", "Key Action: $key (method: $inputMethod)")
+        
+        // 1. Navigation / Global Actions
+        when (key) {
+            "BACK", "KEYCODE_BACK" -> { performGlobalAction(GLOBAL_ACTION_BACK); return }
+            "HOME", "KEYCODE_HOME" -> { performGlobalAction(GLOBAL_ACTION_HOME); return }
+            "RECENTS", "KEYCODE_APP_SWITCH" -> { performGlobalAction(GLOBAL_ACTION_RECENTS); return }
+            "NOTIFICATIONS" -> { performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS); return }
+            "QUICK_SETTINGS" -> { performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS); return }
+            "POWER_DIALOG" -> { performGlobalAction(GLOBAL_ACTION_POWER_DIALOG); return }
+        }
+
+        // 2. Hardware Keyboard Emulation (Experimental)
+        if (inputMethod == "hardware_keyboard") {
+            // Note: AccessibilityService cannot easily inject raw KeyEvents into other apps.
+            // We'll try to find the focused node and perform actions if possible.
+            injectHardwareKey(key)
+            return
+        }
+
+        // 3. Fallback to global action mapping
+        performGlobalActionByName(key)
+    }
+
+    private fun performGlobalActionByName(action: String) {
+        val normalized = if (action.startsWith("KEYCODE_")) action else "KEYCODE_$action"
+        
+        when (normalized) {
+            "KEYCODE_DPAD_UP" -> injectHardwareKey("KEYCODE_DPAD_UP")
+            "KEYCODE_DPAD_DOWN" -> injectHardwareKey("KEYCODE_DPAD_DOWN")
+            "KEYCODE_DPAD_LEFT" -> injectHardwareKey("KEYCODE_DPAD_LEFT")
+            "KEYCODE_DPAD_RIGHT" -> injectHardwareKey("KEYCODE_DPAD_RIGHT")
+            "KEYCODE_ENTER", "KEYCODE_NUMPAD_ENTER" -> injectHardwareKey("KEYCODE_ENTER")
+            "KEYCODE_DEL", "KEYCODE_BACKSPACE" -> injectHardwareKey("KEYCODE_DEL")
+            "KEYCODE_SPACE" -> injectHardwareKey("KEYCODE_SPACE")
+            "KEYCODE_TAB" -> injectHardwareKey("KEYCODE_TAB")
+            "KEYCODE_ESCAPE" -> performGlobalAction(GLOBAL_ACTION_BACK)
             else -> {
+                // If it's a single character or starts with KEYCODE_ and has one char after
                 if (action.length == 1) {
                     injectChar(action[0])
+                } else if (normalized.length == 9 && normalized.startsWith("KEYCODE_")) {
+                    injectChar(normalized.last())
                 }
             }
         }
     }
 
-    private fun injectKey(keyCode: Int) {
-        when (keyCode) {
-            KeyEvent.KEYCODE_HOME -> performGlobalAction(GLOBAL_ACTION_HOME)
-            KeyEvent.KEYCODE_BACK -> performGlobalAction(GLOBAL_ACTION_BACK)
-            KeyEvent.KEYCODE_APP_SWITCH -> performGlobalAction(GLOBAL_ACTION_RECENTS)
-            KeyEvent.KEYCODE_ENTER -> {
-                rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    private fun injectHardwareKey(keyName: String) {
+        val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        
+        when (keyName) {
+            "KEYCODE_ENTER" -> {
+                if (node != null) {
+                    node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                } else {
+                    // Try to click center of screen as fallback for DPAD_CENTER/ENTER
+                    performClick(0.5f, 0.5f)
+                }
             }
-            KeyEvent.KEYCODE_DEL -> {
-                val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            "KEYCODE_DEL" -> {
                 if (node != null && node.className?.contains("EditText") == true) {
                     val currentText = (node.text ?: "").toString()
                     if (currentText.isNotEmpty()) {
@@ -185,6 +215,14 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
                         node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
                     }
                 }
+            }
+            "KEYCODE_DPAD_UP" -> performSwipe(0.5f, 0.6f, 0.5f, 0.4f, 100)
+            "KEYCODE_DPAD_DOWN" -> performSwipe(0.5f, 0.4f, 0.5f, 0.6f, 100)
+            "KEYCODE_DPAD_LEFT" -> performSwipe(0.6f, 0.5f, 0.4f, 0.5f, 100)
+            "KEYCODE_DPAD_RIGHT" -> performSwipe(0.4f, 0.5f, 0.6f, 0.5f, 100)
+            "KEYCODE_TAB" -> {
+                // Accessibility focus move
+                rootInActiveWindow?.focusSearch(View.FOCUS_FORWARD)?.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
             }
         }
     }
