@@ -305,61 +305,93 @@ fun PermissionSection(
     val adminComponent = android.content.ComponentName(context, com.example.cfdremoteassist.receivers.RemoteAssistDeviceAdminReceiver::class.java)
     val isDeviceAdminActive = dpm.isAdminActive(adminComponent)
 
-    val permissionGroups = listOf(
-        "Location" to arrayOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        ),
-        "Communication" to arrayOf(
-            Manifest.permission.READ_PHONE_STATE,
-            Manifest.permission.CALL_PHONE,
-            Manifest.permission.READ_SMS,
-            Manifest.permission.SEND_SMS,
-            Manifest.permission.RECEIVE_SMS,
-            Manifest.permission.READ_CONTACTS,
-            Manifest.permission.READ_CALL_LOG
-        ),
-        "Media & Sensors" to arrayOf(
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.CAMERA,
-            Manifest.permission.BODY_SENSORS,
-            Manifest.permission.READ_CALENDAR
-        ),
-        "Storage" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            arrayOf(
-                Manifest.permission.READ_MEDIA_IMAGES,
-                Manifest.permission.READ_MEDIA_VIDEO,
-                Manifest.permission.READ_MEDIA_AUDIO
-            )
+    val locationPermissions = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+    val commsPermissions = arrayOf(
+        Manifest.permission.READ_PHONE_STATE, Manifest.permission.CALL_PHONE,
+        Manifest.permission.READ_SMS, Manifest.permission.SEND_SMS, Manifest.permission.RECEIVE_SMS,
+        Manifest.permission.READ_CONTACTS, Manifest.permission.READ_CALL_LOG
+    )
+    val mediaPermissions = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA, Manifest.permission.READ_CALENDAR).apply {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) add(Manifest.permission.BODY_SENSORS)
+    }.toTypedArray()
+    
+    val storagePermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_AUDIO)
+    } else {
+        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+    
+    val nearbyPermissions = mutableListOf<String>().apply {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            add(Manifest.permission.BLUETOOTH_SCAN)
+            add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
+    }.toTypedArray()
+
+    val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+        val denied = results.filter { !it.value }.keys
+        if (denied.isEmpty()) {
+            Toast.makeText(context, "Location: Granted", Toast.LENGTH_SHORT).show()
         } else {
-            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-        },
-        "Notifications & Nearby" to mutableListOf<String>().apply {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                add(Manifest.permission.BLUETOOTH_SCAN)
-                add(Manifest.permission.BLUETOOTH_CONNECT)
+            Toast.makeText(context, "Location Denied: ${denied.joinToString()}", Toast.LENGTH_LONG).show()
+        }
+    }
+    val commsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+        val denied = results.filter { !it.value }.keys
+        if (denied.isEmpty()) {
+            Toast.makeText(context, "Communication: Granted", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "Communication Denied: ${denied.joinToString()}", Toast.LENGTH_LONG).show()
+        }
+    }
+    val mediaLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+        val denied = results.filter { !it.value }.keys
+        if (denied.isEmpty()) {
+            Toast.makeText(context, "Media & Sensors: Granted", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "Media Denied: ${denied.joinToString()}", Toast.LENGTH_LONG).show()
+            // If denied, offer to open settings
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = android.net.Uri.fromParts("package", context.packageName, null)
             }
-        }.toTypedArray()
+            context.startActivity(intent)
+        }
+    }
+    val storageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+        val denied = results.filter { !it.value }.keys
+        if (denied.isEmpty()) {
+            Toast.makeText(context, "Storage: Granted", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "Storage Denied: ${denied.joinToString()}", Toast.LENGTH_LONG).show()
+        }
+    }
+    val nearbyLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+        val denied = results.filter { !it.value }.keys
+        if (denied.isEmpty()) {
+            Toast.makeText(context, "Notifications: Granted", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "Notifications Denied: ${denied.joinToString()}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val allGroups = listOf(
+        Triple("Location", locationPermissions, locationLauncher),
+        Triple("Communication", commsPermissions, commsLauncher),
+        Triple("Media & Sensors", mediaPermissions, mediaLauncher),
+        Triple("Storage", storagePermissions, storageLauncher),
+        Triple("Notifications & Nearby", nearbyPermissions, nearbyLauncher)
     )
 
-    // Only count permissions that are actually relevant for the current API level
-    val allPermissionsGranted = permissionGroups.all { (_, permissions) ->
+    val allPermissionsGranted = allGroups.all { (_, permissions, _) ->
         permissions.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("System Permissions", style = MaterialTheme.typography.titleMedium)
         
-        permissionGroups.forEach { (groupName, permissions) ->
+        allGroups.forEach { (groupName, permissions, launcher) ->
             if (permissions.isNotEmpty()) {
-                val launcher = rememberLauncherForActivityResult(
-                    ActivityResultContracts.RequestMultiplePermissions()
-                ) { results ->
-                    val allGranted = results.values.all { it }
-                    Toast.makeText(context, "$groupName: ${if (allGranted) "Granted" else "Check Permissions"}", Toast.LENGTH_SHORT).show()
-                }
-                
                 val isGranted = permissions.all { 
                     ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED 
                 }
