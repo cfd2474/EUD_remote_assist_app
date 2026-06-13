@@ -88,6 +88,14 @@ fun MainScreen() {
     // Auto-refresh when returning to app from system settings
     val lifecycleOwner = LocalLifecycleOwner.current
     
+    // Refresh tracking connection on app launch
+    LaunchedEffect(Unit) {
+        if (configManager.isRegistered()) {
+            val intent = Intent(context, LocationTrackingService::class.java)
+            context.startForegroundService(intent)
+        }
+    }
+
     // Auto-trigger screen share if requested by service
     LaunchedEffect(refreshTrigger) {
         val intent = (context as? Activity)?.intent

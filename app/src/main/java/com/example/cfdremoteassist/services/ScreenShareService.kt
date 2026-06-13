@@ -234,6 +234,7 @@ class ScreenShareService : Service() {
                     val sdpType = sdpObj.get("type")?.asString
                     val sdpDesc = sdpObj.get("sdp")?.asString
                     if (sdpType == "offer" && sdpDesc != null) {
+                        Log.d("ScreenShare", "Processing WebRTC Offer")
                         val sdp = SessionDescription(SessionDescription.Type.OFFER, sdpDesc)
                         peerConnection?.setRemoteDescription(SimpleSdpObserver {
                             peerConnection?.createAnswer(SimpleSdpObserver { answer ->
@@ -246,6 +247,7 @@ class ScreenShareService : Service() {
                                         }
                                         add("sdp", sdpAnswer)
                                     }
+                                    Log.d("ScreenShare", "Sending WebRTC Answer")
                                     networkManager.sendWebSocketMessage(gson.toJson(answerJson))
                                 }, null)
                             }, MediaConstraints())
@@ -257,6 +259,7 @@ class ScreenShareService : Service() {
                         iceObj.get("sdpMLineIndex").asInt,
                         iceObj.get("candidate").asString
                     )
+                    Log.d("ScreenShare", "Processing Remote ICE Candidate")
                     peerConnection?.addIceCandidate(candidate)
                 }
             }
