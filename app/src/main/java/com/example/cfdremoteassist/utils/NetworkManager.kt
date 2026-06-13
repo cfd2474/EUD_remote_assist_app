@@ -198,20 +198,27 @@ class NetworkManager private constructor(private val context: Context, private v
         })
     }
 
-    fun sendKeepAlive() {
-        val ping = JsonObject().apply {
-            addProperty("type", "ping")
+    fun sendWebSocketMessage(json: String) {
+        val currentWs = webSocket
+        if (currentWs != null) {
+            val sent = currentWs.send(json)
+            if (sent) return
         }
-        webSocket?.send(gson.toJson(ping))
+        
+        Log.w("NetworkManager", "WebSocket send failed, using HTTP fallback signaling")
+        postSignaling(json)
     }
 
-    fun sendWebSocketMessage(json: String) {
-        if (webSocket == null) {
-            Log.w("NetworkManager", "WS not connected, trying fallback signaling...")
-            postSignaling(json)
-            return
+    fun isWebSocketConnected(): Boolean = webSocket != null
+
+    fun sendKeepAlive() {
+        val currentWs = webSocket
+        if (currentWs != null) {
+            val ping = JsonObject().apply {
+                addProperty("type", "ping")
+            }
+            currentWs.send(gson.toJson(ping))
         }
-        webSocket?.send(json)
     }
 
     fun disconnectWebSocket() {

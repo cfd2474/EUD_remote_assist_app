@@ -205,6 +205,7 @@ class ScreenShareService : Service() {
                     }
                     add("ice", iceObj)
                 }
+                Log.d("ScreenShare", "Sending Local ICE Candidate")
                 networkManager.sendWebSocketMessage(gson.toJson(iceJson))
             }
             override fun onSignalingChange(state: PeerConnection.SignalingState) {}
@@ -219,7 +220,9 @@ class ScreenShareService : Service() {
                 }
             }
             override fun onIceConnectionReceivingChange(receiving: Boolean) {}
-            override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) {}
+            override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) {
+                Log.d("ScreenShare", "ICE Gathering State: $state")
+            }
             override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) {}
             override fun onAddStream(stream: MediaStream) {}
             override fun onRemoveStream(stream: MediaStream) {}
@@ -228,7 +231,8 @@ class ScreenShareService : Service() {
             override fun onAddTrack(receiver: RtpReceiver, mediaStreams: Array<out MediaStream>) {}
         })
 
-        peerConnection?.addTrack(localVideoTrack)
+        // Use proper stream identification to trigger ICE gathering
+        peerConnection?.addTrack(localVideoTrack, listOf("stream0"))
     }
 
     private fun sendDeviceEvent(eventName: String) {

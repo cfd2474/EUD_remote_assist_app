@@ -121,13 +121,18 @@ class LocationTrackingService : Service() {
             override fun run() {
                 val secret = configManager.getConnectionSecret()
                 if (secret.isNotEmpty()) {
-                    connectRealTimeGateway() 
-                    networkManager.sendKeepAlive()
+                    if (!networkManager.isWebSocketConnected()) {
+                        Log.i("LocationTracking", "WebSocket disconnected, attempting reconnect...")
+                        connectRealTimeGateway() 
+                    } else {
+                        // Send keepalive every 30s as per spec
+                        networkManager.sendKeepAlive()
+                    }
                 }
-                wsRetryHandler.postDelayed(this, TimeUnit.SECONDS.toMillis(60))
+                wsRetryHandler.postDelayed(this, TimeUnit.SECONDS.toMillis(30))
             }
         }
-        wsRetryHandler.postDelayed(wsRetryRunnable!!, TimeUnit.SECONDS.toMillis(60))
+        wsRetryHandler.postDelayed(wsRetryRunnable!!, TimeUnit.SECONDS.toMillis(30))
     }
 
     private fun connectRealTimeGateway() {
