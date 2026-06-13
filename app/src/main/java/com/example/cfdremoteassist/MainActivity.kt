@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.app.AppOpsManager
+import android.content.Context
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -170,6 +172,7 @@ fun ServiceStatusSection() {
             StatusItem("Accessibility", isAccessibilityServiceEnabled(context))
             StatusItem("Notification Listener", isNotificationServiceEnabled(context))
             StatusItem("Overlay (Draw on screen)", Settings.canDrawOverlays(context))
+            StatusItem("Usage Access", isUsageAccessGranted(context))
         }
         
         Button(
@@ -239,6 +242,25 @@ fun isNotificationServiceEnabled(context: android.content.Context): Boolean {
     val pkgName = context.packageName
     val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
     return flat?.contains(pkgName) == true
+}
+
+fun isUsageAccessGranted(context: Context): Boolean {
+    val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+    val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        appOps.unsafeCheckOpNoThrow(
+            AppOpsManager.OPSTR_GET_USAGE_STATS,
+            android.os.Process.myUid(),
+            context.packageName
+        )
+    } else {
+        @Suppress("DEPRECATION")
+        appOps.checkOpNoThrow(
+            AppOpsManager.OPSTR_GET_USAGE_STATS,
+            android.os.Process.myUid(),
+            context.packageName
+        )
+    }
+    return mode == AppOpsManager.MODE_ALLOWED
 }
 
 @Composable
