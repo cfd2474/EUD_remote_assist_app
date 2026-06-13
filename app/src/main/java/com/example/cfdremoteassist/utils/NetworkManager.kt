@@ -192,7 +192,7 @@ class NetworkManager private constructor(private val context: Context, private v
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e("NetworkManager", "WebSocket Failure: ${t.message}", t)
+                Log.e("NetworkManager", "WebSocket Failure: ${t.message}. Response: ${response?.code}", t)
                 this@NetworkManager.webSocket = null
             }
         })
@@ -201,11 +201,12 @@ class NetworkManager private constructor(private val context: Context, private v
     fun sendWebSocketMessage(json: String) {
         val currentWs = webSocket
         if (currentWs != null) {
+            Log.d("NetworkManager", "Sending WS Message (size: ${json.length})")
             val sent = currentWs.send(json)
             if (sent) return
         }
         
-        Log.w("NetworkManager", "WebSocket send failed, using HTTP fallback signaling")
+        Log.w("NetworkManager", "WebSocket send failed (or null), using HTTP fallback signaling")
         postSignaling(json)
     }
 

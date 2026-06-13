@@ -72,6 +72,9 @@ class ScreenShareService : Service() {
             .createPeerConnectionFactory()
     }
 
+    private var isInitialized = false
+    private val signalingBuffer = mutableListOf<String>()
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
@@ -80,7 +83,14 @@ class ScreenShareService : Service() {
             }
             ACTION_PROCESS_SIGNAL -> {
                 val signal = intent.getStringExtra(EXTRA_SIGNAL)
-                if (signal != null) handleSignalingMessage(signal)
+                if (signal != null) {
+                    if (isInitialized) {
+                        handleSignalingMessage(signal)
+                    } else {
+                        Log.d("ScreenShare", "Buffering signal (service warming up)")
+                        signalingBuffer.add(signal)
+                    }
+                }
                 return START_NOT_STICKY
             }
             else -> {
@@ -105,7 +115,7 @@ class ScreenShareService : Service() {
                 }
             }
         }
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -137,13 +147,13 @@ class ScreenShareService : Service() {
         }
     }
 
+    private var firstFrameCaptured = false
+
     private fun startScreenCapture(resultCode: Int, data: Intent) {
         val metrics = DisplayMetrics()
         val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         windowManager.defaultDisplay.getRealMetrics(metrics)
 
-        // WebRTC's ScreenCapturerAndroid will call getMediaProjection internally.
-        // Calling it manually here as well causes a SecurityException: "Don't re-use the resultData".
         videoCapturer = ScreenCapturerAndroid(data, object : MediaProjection.Callback() {
             override fun onStop() {
                 Log.d("ScreenShare", "MediaProjection stopped")
@@ -154,27 +164,55 @@ class ScreenShareService : Service() {
         videoSource = peerConnectionFactory?.createVideoSource(videoCapturer!!.isScreencast)
         
         surfaceTextureHelper = SurfaceTextureHelper.create("WebRTC-SurfaceHelper", eglBase!!.eglBaseContext)
-        videoCapturer!!.initialize(surfaceTextureHelper, this, videoSource!!.capturerObserver)
         
-        // Use full screen metrics
-        videoCapturer!!.startCapture(metrics.widthPixels, metrics.heightPixels, 30)
+        // Wrap the observer to detect the first frame
+        val originalObserver = videoSource!!.capturerObserver
+        val wrappingObserver = object : CapturerObserver {
+            override fun onCapturerStarted(success: Boolean) {
+                originalObserver.onCapturerStarted(success)
+                Log.d("ScreenShare", "Capturer started: $success")
+            }
+            override fun onCapturerStopped() {
+                originalObserver.onCapturerStopped()
+                Log.d("ScreenShare", "Capturer stopped")
+            }
+            override fun onFrameCaptured(frame: VideoFrame) {
+                originalObserver.onFrameCaptured(frame)
+                if (!firstFrameCaptured) {
+                    firstFrameCaptured = true
+                    Log.i("ScreenShare", "FIRST FRAME CAPTURED! ${frame.rotatedWidth}x${frame.rotatedHeight}")
+                    
+                    // ONLY signal ready after we have actual video data
+                    handler.post {
+                        Log.d("ScreenShare", "Signaling WEBRTC_READY to portal")
+                        val readyJson = JsonObject().apply {
+                            addProperty("type", "webrtc_ready")
+                        }
+                        networkManager.sendWebSocketMessage(gson.toJson(readyJson))
+                        sendDeviceEvent("WEBRTC_READY")
+                        
+                        // Process any buffered signals now that we are fully ready
+                        isInitialized = true
+                        Log.d("ScreenShare", "Service initialized, processing ${signalingBuffer.size} buffered signals")
+                        signalingBuffer.forEach { handleSignalingMessage(it) }
+                        signalingBuffer.clear()
+                    }
+                }
+            }
+        }
+
+        videoCapturer!!.initialize(surfaceTextureHelper, this, wrappingObserver)
+        
+        // Use half resolution for better performance and faster start
+        val width = metrics.widthPixels / 2
+        val height = metrics.heightPixels / 2
+        Log.d("ScreenShare", "Starting capture at ${width}x${height}")
+        videoCapturer!!.startCapture(width, height, 30)
 
         localVideoTrack = peerConnectionFactory?.createVideoTrack("VIDEO_TRACK", videoSource)
         localVideoTrack?.setEnabled(true)
         
         setupPeerConnection()
-
-        // Delay signaling readiness to ensure capture hardware is warm
-        handler.postDelayed({
-            if (videoCapturer != null) {
-                Log.d("ScreenShare", "Sending WEBRTC_READY signal")
-                val readyJson = JsonObject().apply {
-                    addProperty("type", "webrtc_ready")
-                }
-                networkManager.sendWebSocketMessage(gson.toJson(readyJson))
-                sendDeviceEvent("WEBRTC_READY")
-            }
-        }, 1500)
         
         startSignalingPoll()
     }
