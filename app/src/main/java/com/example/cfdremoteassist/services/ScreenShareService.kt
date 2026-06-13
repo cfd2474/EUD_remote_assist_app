@@ -355,6 +355,9 @@ class ScreenShareService : Service() {
                                                 }
                                                 Log.d("ScreenShare", "Sending WebRTC Answer. WS Connected: ${networkManager.isWebSocketConnected()}")
                                                 networkManager.sendWebSocketMessage(gson.toJson(answerJson))
+                                                
+                                                // Minimize app and go to home screen after handshake initiated
+                                                minimizeApp()
                                             }
                                         }, desc)
                                     }
@@ -375,6 +378,14 @@ class ScreenShareService : Service() {
         } catch (e: Exception) {
             Log.e("ScreenShare", "Signaling error", e)
         }
+    }
+
+    private fun minimizeApp() {
+        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        startActivity(homeIntent)
     }
 
     private open class SimpleSdpObserver : SdpObserver {

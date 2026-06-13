@@ -239,6 +239,9 @@ fun ServiceStatusSection(onRefresh: () -> Unit) {
         StatusItem("Notification Listener", isNotificationServiceEnabled(context))
         StatusItem("Overlay (Draw on screen)", Settings.canDrawOverlays(context))
         StatusItem("Usage Access", isUsageAccessGranted(context))
+        
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        StatusItem("Battery Optimization Ignored", powerManager.isIgnoringBatteryOptimizations(context.packageName))
     }
 }
 
@@ -521,6 +524,17 @@ fun PermissionSection(
             }
         }
         
+        SpecialAccessButton(
+            label = "Disable Battery Optimization",
+            enabled = (context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).isIgnoringBatteryOptimizations(context.packageName),
+            onClick = {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = android.net.Uri.parse("package:${context.packageName}")
+                }
+                context.startActivity(intent)
+            }
+        )
+
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
         
         Text("Special Access", style = MaterialTheme.typography.titleMedium)
@@ -566,6 +580,17 @@ fun PermissionSection(
                 val intent = Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
                     putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
                     putExtra(android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Required for remote locking and device management.")
+                }
+                context.startActivity(intent)
+            }
+        )
+
+        SpecialAccessButton(
+            label = "Disable Battery Optimization",
+            enabled = (context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).isIgnoringBatteryOptimizations(context.packageName),
+            onClick = {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = android.net.Uri.parse("package:${context.packageName}")
                 }
                 context.startActivity(intent)
             }
@@ -678,7 +703,18 @@ fun SettingsPanel(configManager: ManagedConfigManager, onReRegister: () -> Unit,
             Text("Interval: ${configManager.getTrackingInterval()} mins")
             Text("Connection Secret: ${configManager.getConnectionSecret()}")
             
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            SpecialAccessButton(
+            label = "Disable Battery Optimization",
+            enabled = (context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).isIgnoringBatteryOptimizations(context.packageName),
+            onClick = {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = android.net.Uri.parse("package:${context.packageName}")
+                }
+                context.startActivity(intent)
+            }
+        )
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             
             Button(modifier = Modifier.fillMaxWidth(), onClick = {
                 val intent = Intent(context, LocationTrackingService::class.java)
@@ -694,6 +730,26 @@ fun SettingsPanel(configManager: ManagedConfigManager, onReRegister: () -> Unit,
 
             Button(modifier = Modifier.fillMaxWidth(), onClick = onLock) {
                 Text("Lock Settings")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                onClick = {
+                    val intent = Intent(context, LocationTrackingService::class.java).apply {
+                        action = ScreenShareService.ACTION_STOP
+                    }
+                    context.stopService(intent)
+                    context.stopService(Intent(context, LocationTrackingService::class.java))
+                    context.stopService(Intent(context, ScreenShareService::class.java))
+                    context.stopService(Intent(context, com.example.cfdremoteassist.services.OverlayService::class.java))
+                    (context as? Activity)?.finishAffinity()
+                    System.exit(0)
+                }
+            ) {
+                Text("Force Quit App", color = MaterialTheme.colorScheme.onError)
             }
         }
     }
