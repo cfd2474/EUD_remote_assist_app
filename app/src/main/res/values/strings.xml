@@ -11,4 +11,6 @@
     <string name="tracking_interval_desc">Interval in minutes for sending location updates</string>
     <string name="agency_title">Agency</string>
     <string name="agency_desc">The agency or organization this device belongs to</string>
+    <string name="auto_grant_permissions_title">Auto-Grant System Permissions</string>
+    <string name="auto_grant_permissions_desc">If enabled, the app will automatically grant all required system permissions upon launch (Requires Device Owner status).</string>
 </resources>

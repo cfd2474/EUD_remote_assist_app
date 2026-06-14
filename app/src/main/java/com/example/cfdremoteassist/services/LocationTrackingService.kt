@@ -6,6 +6,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.app.admin.DevicePolicyManager
@@ -191,7 +192,7 @@ class LocationTrackingService : Service() {
 
     private fun wakeUpDevice() {
         try {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val powerManager = getSystemService(POWER_SERVICE) as PowerManager
             @Suppress("DEPRECATION")
             val wakeLock = powerManager.newWakeLock(
                 PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
@@ -225,6 +226,13 @@ class LocationTrackingService : Service() {
             } else if (cmd == "STOP_REMOTE_ADMIN") {
                 RemoteSessionManager.isSessionActive = false
                 networkManager.setSessionActive(false)
+            } else if (cmd == "REMOTE_UNLOCK") {
+                val pin = json.get("pin")?.asString
+                if (!pin.isNullOrEmpty()) {
+                    RemoteAssistAccessibilityService.instance?.performRemoteUnlock(pin)
+                    sendEventToServer("COMMAND_HANDLED", mapOf("command" to cmd))
+                    return
+                }
             }
             
             val intent = Intent(this, LocationTrackingService::class.java).apply {
@@ -300,7 +308,7 @@ class LocationTrackingService : Service() {
 
     @SuppressLint("MissingPermission")
     private fun sendDeviceRegistration(isManualResync: Boolean = false) {
-        val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+        val telephonyManager = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
         
         val deviceInfo = mutableMapOf<String, String>()
         deviceInfo["uid"] = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
@@ -309,7 +317,7 @@ class LocationTrackingService : Service() {
         try {
             phoneNumber = telephonyManager.line1Number
             if (phoneNumber.isNullOrEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-                val subscriptionManager = getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
+                val subscriptionManager = getSystemService(TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
                 val activeSubscriptions = subscriptionManager.activeSubscriptionInfoList
                 if (!activeSubscriptions.isNullOrEmpty()) {
                     for (info in activeSubscriptions) {
@@ -336,7 +344,7 @@ class LocationTrackingService : Service() {
         deviceInfo["phone_number"] = phoneNumber ?: "unknown"
         deviceInfo["device_name"] = Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME) ?: Build.MODEL
         deviceInfo["model"] = Build.MODEL
-        deviceInfo["app_version"] = "1.2.0"
+        deviceInfo["app_version"] = "1.2.1"
 
         val agency = configManager.getAgency()
         if (agency.isNotEmpty()) {
@@ -368,7 +376,7 @@ class LocationTrackingService : Service() {
     }
 
     private fun loadManagedConfigurations() {
-        val restrictionsManager = getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
+        val restrictionsManager = getSystemService(RESTRICTIONS_SERVICE) as RestrictionsManager
         val appRestrictions = restrictionsManager.applicationRestrictions
         
         trackingServerUrl = appRestrictions.getString("tracking_server_url", "https://example.com/track")
@@ -418,6 +426,14 @@ class LocationTrackingService : Service() {
             startService(overlayIntent)
         }
         
+        // Check if locked and notify server
+        val keyguardManager = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
+        if (keyguardManager.isKeyguardLocked) {
+            sendEventToServer("DEVICE_LOCKED", mapOf("reason" to "PIN required for full access"))
+            // Force a wakeup again just before swiping starts
+            wakeUpDevice()
+        }
+
         // Launch MainActivity to trigger the Screen Capture permission dialog
         val mainIntent = Intent(this, com.example.cfdremoteassist.MainActivity::class.java).apply {
             action = "TRIGGER_SCREEN_SHARE"
@@ -425,7 +441,7 @@ class LocationTrackingService : Service() {
         }
         startActivity(mainIntent)
 
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
+        Handler(Looper.getMainLooper()).post {
             Toast.makeText(this, "Remote Admin: Requesting Screen Share Permission", Toast.LENGTH_LONG).show()
         }
     }
@@ -456,7 +472,7 @@ class LocationTrackingService : Service() {
         }
 
         // 2. Initiate lock
-        val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val adminComponent = ComponentName(this, RemoteAssistDeviceAdminReceiver::class.java)
         
         if (dpm.isAdminActive(adminComponent)) {
@@ -529,7 +545,7 @@ class LocationTrackingService : Service() {
 
     private fun startAudiblePing() {
         Log.d("LocationTracking", "Starting 2-minute audible ping")
-        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         
         originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_RING)
         
@@ -549,7 +565,7 @@ class LocationTrackingService : Service() {
 
         showPingPopup()
 
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(1, createNotification(isPingActive = true))
 
         stopPingRunnable = Runnable { stopAudiblePing() }
@@ -559,7 +575,7 @@ class LocationTrackingService : Service() {
     private fun showPingPopup() {
         if (pingOverlayView != null) return
 
-        val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -611,20 +627,20 @@ class LocationTrackingService : Service() {
         stopPingRunnable?.let { handler.removeCallbacks(it) }
         
         if (originalVolume != -1) {
-            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
             audioManager.setStreamVolume(AudioManager.STREAM_RING, originalVolume, 0)
             originalVolume = -1
         }
 
         pingOverlayView?.let {
-            val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            val wm = getSystemService(WINDOW_SERVICE) as WindowManager
             try {
                 wm.removeView(it)
             } catch (e: Exception) {}
             pingOverlayView = null
         }
 
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(1, createNotification(isPingActive = false))
     }
 

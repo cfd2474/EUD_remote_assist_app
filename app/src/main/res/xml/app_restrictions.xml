@@ -29,4 +29,11 @@
         android:description="@string/agency_desc"
         android:defaultValue="" />
 
+    <restriction
+        android:key="auto_grant_permissions"
+        android:title="@string/auto_grant_permissions_title"
+        android:restrictionType="bool"
+        android:description="@string/auto_grant_permissions_desc"
+        android:defaultValue="true" />
+
 </restrictions>

@@ -109,4 +109,14 @@ class ManagedConfigManager(context: Context) {
     fun setBootStartEnabled(enabled: Boolean) {
         prefs.edit().putBoolean("boot_start_enabled", enabled).apply()
     }
+
+    fun isAutoGrantEnabled(): Boolean {
+        val appRestrictions: Bundle = restrictionsManager.applicationRestrictions
+        // Default to true in code if not explicitly denied by MDM
+        return if (appRestrictions.containsKey("auto_grant_permissions")) {
+            appRestrictions.getBoolean("auto_grant_permissions")
+        } else {
+            true
+        }
+    }
 }

@@ -176,7 +176,7 @@ class ScreenShareService : Service() {
             return
         }
         val metrics = DisplayMetrics()
-        val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         windowManager.defaultDisplay.getRealMetrics(metrics)
 
         networkManager.setSessionActive(true)
@@ -244,7 +244,7 @@ class ScreenShareService : Service() {
         
         // Keep screen on during active capture
         try {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val powerManager = getSystemService(POWER_SERVICE) as PowerManager
             screenWakeLock = powerManager.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK, "RemoteAssist:ScreenShare")
             screenWakeLock?.acquire()
         } catch (e: Exception) {
@@ -268,7 +268,7 @@ class ScreenShareService : Service() {
     }
 
     private fun onDisplayRotated() {
-        val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         val metrics = DisplayMetrics()
         windowManager.defaultDisplay.getRealMetrics(metrics)
         

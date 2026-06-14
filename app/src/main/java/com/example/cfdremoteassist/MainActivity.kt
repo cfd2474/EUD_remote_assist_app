@@ -76,10 +76,30 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        
+        // Wake up and show over lock screen again for the new intent
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
+        }
+
+        // This will trigger the LaunchedEffect(refreshTrigger) if it's a share request
+        if (intent.action == "TRIGGER_SCREEN_SHARE") {
+            // Force a recomposition to process the new intent action
+            recreate()
+        }
+    }
+
 
     fun getPhoneNumber(context: Context): String? {
         try {
-            val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as android.telephony.TelephonyManager
+            val telephonyManager = context.getSystemService(TELEPHONY_SERVICE) as android.telephony.TelephonyManager
             
             // 1. Try TelephonyManager.line1Number (Requires READ_PHONE_STATE or READ_PHONE_NUMBERS)
             @Suppress("MissingPermission")
@@ -87,7 +107,7 @@ class MainActivity : ComponentActivity() {
             
             // 2. If null, try SubscriptionManager (Modern way for multi-SIM)
             if (number.isNullOrEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-                val subscriptionManager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as android.telephony.SubscriptionManager
+                val subscriptionManager = context.getSystemService(TELEPHONY_SUBSCRIPTION_SERVICE) as android.telephony.SubscriptionManager
                 @Suppress("MissingPermission")
                 val activeSubscriptions = subscriptionManager.activeSubscriptionInfoList
                 if (!activeSubscriptions.isNullOrEmpty()) {
@@ -140,6 +160,9 @@ fun MainScreen(activity: MainActivity) {
     var isRegistered by remember { mutableStateOf(configManager.isRegistered()) }
     var isRegistering by remember { mutableStateOf(false) }
     var registrationError by remember { mutableStateOf<String?>(null) }
+    
+    var showRestrictedDialog by remember { mutableStateOf(false) }
+    var isRestricted by remember { mutableStateOf(isRestrictedSettingsActive(context)) }
     
     var refreshTrigger by remember { mutableIntStateOf(0) }
     val scrollState = rememberScrollState()
@@ -196,6 +219,7 @@ fun MainScreen(activity: MainActivity) {
             if (event == Lifecycle.Event.ON_RESUME) {
                 refreshTrigger++
                 isRegistered = configManager.isRegistered()
+                isRestricted = isRestrictedSettingsActive(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -217,7 +241,7 @@ fun MainScreen(activity: MainActivity) {
         val deviceInfo = mutableMapOf<String, String>()
         deviceInfo["uid"] = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
         deviceInfo["model"] = Build.MODEL
-        deviceInfo["app_version"] = "1.2.0"
+        deviceInfo["app_version"] = "1.2.1"
         
         val agency = configManager.getAgency()
         if (agency.isNotEmpty()) {
@@ -248,6 +272,48 @@ fun MainScreen(activity: MainActivity) {
         }
     }
 
+    // Permission groupings for status check
+    val locationPermissions = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+    val commsPermissions = mutableListOf(
+        Manifest.permission.READ_PHONE_STATE, Manifest.permission.CALL_PHONE,
+        Manifest.permission.READ_SMS, Manifest.permission.SEND_SMS, Manifest.permission.RECEIVE_SMS,
+        Manifest.permission.READ_CONTACTS, Manifest.permission.READ_CALL_LOG
+    ).apply {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            add(Manifest.permission.READ_PHONE_NUMBERS)
+        }
+    }.toTypedArray()
+    val mediaPermissions = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA, Manifest.permission.READ_CALENDAR).apply {
+        val hasHeartRate = context.packageManager.hasSystemFeature(PackageManager.FEATURE_SENSOR_HEART_RATE)
+        if (hasHeartRate) {
+            add(Manifest.permission.BODY_SENSORS)
+        }
+    }.toTypedArray()
+    val storagePermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_AUDIO)
+    } else {
+        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+    val nearbyPermissions = mutableListOf<String>().apply {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            add(Manifest.permission.BLUETOOTH_SCAN)
+            add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
+    }.toTypedArray()
+
+    val allGroups = listOf(
+        "Location" to locationPermissions,
+        "Communication" to commsPermissions,
+        "Media & Sensors" to mediaPermissions,
+        "Storage" to storagePermissions,
+        "Notifications & Nearby" to nearbyPermissions
+    )
+
+    val allPermissionsGranted = allGroups.all { (_, permissions) ->
+        permissions.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
+    }
+
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
         Column(
             modifier = Modifier
@@ -266,6 +332,8 @@ fun MainScreen(activity: MainActivity) {
                     isRegistered = isRegistered,
                     isRegistering = isRegistering,
                     registrationError = registrationError,
+                    isRestricted = isRestricted,
+                    onFixRestricted = { showRestrictedDialog = true },
                     onRegister = { performRegistration() }
                 )
 
@@ -292,6 +360,46 @@ fun MainScreen(activity: MainActivity) {
                 }) {
                     Text("Server Configuration Settings")
                 }
+            }
+
+            if (!isRegistered) {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                Button(
+                    onClick = { performRegistration() },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isRegistering && allPermissionsGranted,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                ) {
+                    if (isRegistering) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onTertiary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Registering...")
+                    } else {
+                        Text("Register with Management Server")
+                    }
+                }
+                if (!allPermissionsGranted) {
+                    Text(
+                        "Note: All system permissions above must be granted before registration.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                registrationError?.let { error ->
+                    Text(
+                        text = error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            } else {
+                Text(
+                    "Device Registered", 
+                    color = MaterialTheme.colorScheme.primary, 
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
             }
         }
     }
@@ -322,6 +430,40 @@ fun MainScreen(activity: MainActivity) {
                 showSetPasswordDialog = false
                 isSettingsUnlocked = true
                 Toast.makeText(context, "Password Set & Settings Unlocked", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    if (showRestrictedDialog) {
+        AlertDialog(
+            onDismissRequest = { showRestrictedDialog = false },
+            title = { Text("How to enable Remote Control") },
+            text = {
+                Text(
+                    "Android security requires you to 'Allow restricted settings' before this app can start remote control.\n\n" +
+                    "1. Click the button below to open App Info.\n" +
+                    "2. Tap the three dots (⋮) in the top-right corner.\n" +
+                    "3. Select 'Allow restricted settings'.\n" +
+                    "4. Verify your identity if prompted.\n" +
+                    "5. Return to this app to enable Remote Control."
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showRestrictedDialog = false
+                    
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = android.net.Uri.fromParts("package", context.packageName, null)
+                    }
+                    context.startActivity(intent)
+                }) {
+                    Text("Go to Settings")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRestrictedDialog = false }) {
+                    Text("Cancel")
+                }
             }
         )
     }
@@ -466,18 +608,69 @@ fun isUsageAccessGranted(context: Context): Boolean {
     return mode == AppOpsManager.MODE_ALLOWED
 }
 
+fun isRestrictedSettingsActive(context: Context): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
+    
+    val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+    return try {
+        // AppOpsManager.OP_ACCESS_RESTRICTED_SETTINGS is 119
+        val mode = appOps.noteOpNoThrow(
+            "android:access_restricted_settings",
+            android.os.Process.myUid(),
+            context.packageName,
+            null,
+            null
+        )
+        mode == AppOpsManager.MODE_IGNORED || mode == AppOpsManager.MODE_ERRORED
+    } catch (e: Exception) {
+        // If we can't check, assume restricted if accessibility is off on Android 13+
+        !isAccessibilityServiceEnabled(context)
+    }
+}
+
 @Composable
 fun PermissionSection(
     configManager: ManagedConfigManager,
     isRegistered: Boolean,
     isRegistering: Boolean,
     registrationError: String?,
+    isRestricted: Boolean,
+    onFixRestricted: () -> Unit,
     onRegister: () -> Unit
 ) {
     val context = LocalContext.current
+    var showRemoteControlGuidance by remember { mutableStateOf(false) }
+    
+    if (showRemoteControlGuidance) {
+        AlertDialog(
+            onDismissRequest = { showRemoteControlGuidance = false },
+            title = { Text("Remote Control Setup") },
+            text = {
+                Text(
+                    "1. Click 'Installed / Downloaded Apps'\n" +
+                    "2. Click 'Remote Assist Remote Control'\n" +
+                    "3. Toggle the switch to ON\n\n" +
+                    "If the next screen shows 'Settings Restricted' or access is denied, please return and use the 'ALLOW RESTRICTED SETTINGS' button below first, then proceed to Enable Remote Control."
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showRemoteControlGuidance = false
+                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                }) {
+                    Text("Proceed to Settings")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRemoteControlGuidance = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
     
     val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
-    val adminComponent = ComponentName(context, com.example.cfdremoteassist.receivers.RemoteAssistDeviceAdminReceiver::class.java)
+    val adminComponent = ComponentName(context, RemoteAssistDeviceAdminReceiver::class.java)
     val isDeviceAdminActive = dpm.isAdminActive(adminComponent)
 
     val locationPermissions = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
@@ -511,67 +704,92 @@ fun PermissionSection(
         }
     }.toTypedArray()
 
-    val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+    val allPermissionsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
         val denied = results.filter { !it.value }.keys
         if (denied.isEmpty()) {
-            Toast.makeText(context, "Location: Granted", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "All System Permissions: Granted", Toast.LENGTH_SHORT).show()
         } else {
-            Toast.makeText(context, "Location Denied: ${denied.joinToString()}", Toast.LENGTH_LONG).show()
-        }
-    }
-    val commsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
-        val denied = results.filter { !it.value }.keys
-        if (denied.isEmpty()) {
-            Toast.makeText(context, "Communication: Granted", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(context, "Communication Denied: ${denied.joinToString()}", Toast.LENGTH_LONG).show()
-        }
-    }
-    val mediaLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
-        val denied = results.filter { !it.value }.keys
-        if (denied.isEmpty()) {
-            Toast.makeText(context, "Media & Sensors: Granted", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(context, "Media Denied: ${denied.joinToString()}", Toast.LENGTH_LONG).show()
-            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = android.net.Uri.fromParts("package", context.packageName, null)
-            }
-            context.startActivity(intent)
-        }
-    }
-    val storageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
-        val denied = results.filter { !it.value }.keys
-        if (denied.isEmpty()) {
-            Toast.makeText(context, "Storage: Granted", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(context, "Storage Denied: ${denied.joinToString()}", Toast.LENGTH_LONG).show()
-        }
-    }
-    val nearbyLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
-        val denied = results.filter { !it.value }.keys
-        if (denied.isEmpty()) {
-            Toast.makeText(context, "Notifications: Granted", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(context, "Notifications Denied: ${denied.joinToString()}", Toast.LENGTH_LONG).show()
+            val deniedNames = denied.joinToString { it.substringAfterLast(".") }
+            Toast.makeText(context, "Some Permissions Denied: $deniedNames", Toast.LENGTH_LONG).show()
         }
     }
 
     val allGroups = listOf(
-        Triple("Location", locationPermissions, locationLauncher),
-        Triple("Communication", commsPermissions, commsLauncher),
-        Triple("Media & Sensors", mediaPermissions, mediaLauncher),
-        Triple("Storage", storagePermissions, storageLauncher),
-        Triple("Notifications & Nearby", nearbyPermissions, nearbyLauncher)
+        "Location" to locationPermissions,
+        "Communication" to commsPermissions,
+        "Media & Sensors" to mediaPermissions,
+        "Storage" to storagePermissions,
+        "Notifications & Nearby" to nearbyPermissions
     )
 
-    val allPermissionsGranted = allGroups.all { (_, permissions, _) ->
+    val allPermissionsGranted = allGroups.all { (_, permissions) ->
         permissions.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("System Permissions", style = MaterialTheme.typography.titleMedium)
+        Text("Required Permissions", style = MaterialTheme.typography.titleMedium)
+
+        // 1. Remote Control (Accessibility)
+        SpecialAccessButton(
+            label = "Enable Remote Control (Accessibility)",
+            enabled = isAccessibilityServiceEnabled(context),
+            onClick = { 
+                if (isAccessibilityServiceEnabled(context)) {
+                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                } else {
+                    showRemoteControlGuidance = true 
+                }
+            }
+        )
+
+        // 2. Restricted Settings Prompt
+        if (isRestricted && !isAccessibilityServiceEnabled(context)) {
+            Button(
+                onClick = onFixRestricted,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Text("ALLOW RESTRICTED SETTINGS")
+            }
+        }
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+        // 3. Required System Permissions (Grant All row)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val allSystemPermissions = remember {
+                val list = mutableListOf<String>()
+                allGroups.forEach { list.addAll(it.second) }
+                list.toTypedArray()
+            }
+            val isAllGranted = allSystemPermissions.all { 
+                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED 
+            }
+
+            Text("System Permissions", style = MaterialTheme.typography.titleSmall)
+            
+            Button(
+                onClick = { allPermissionsLauncher.launch(allSystemPermissions) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isAllGranted) Color(0xFF2E7D32) else Color(0xFFC62828),
+                    contentColor = Color.White
+                )
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (isAllGranted) "Granted" else "Grant All")
+                    if (isAllGranted) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
         
-        allGroups.forEach { (groupName, permissions, launcher) ->
+        allGroups.forEach { (groupName, permissions) ->
             if (permissions.isNotEmpty()) {
                 val isGranted = permissions.all { 
                     ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED 
@@ -587,7 +805,8 @@ fun PermissionSection(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(groupName)
+                        val color = if (isGranted) Color(0xFF2E7D32) else Color(0xFFC62828)
+                        Text(text = groupName, color = color)
                         if (!isGranted && deniedPermissions.isNotEmpty()) {
                             Text(
                                 text = "Missing: ${deniedPermissions.joinToString { it.substringAfterLast(".") }}",
@@ -596,14 +815,12 @@ fun PermissionSection(
                             )
                         }
                     }
-                    Button(
-                        onClick = { launcher.launch(permissions) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isGranted) Color(0xFF2E7D32) else Color(0xFFC62828),
-                            contentColor = Color.White
+                    if (isGranted) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Granted",
+                            tint = Color(0xFF2E7D32)
                         )
-                    ) {
-                        Text(if (isGranted) "Granted" else "Request")
                     }
                 }
             }
@@ -619,19 +836,31 @@ fun PermissionSection(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Background Location")
-                Button(
-                    onClick = { bgLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isBgGranted) Color(0xFF2E7D32) else Color(0xFFC62828),
-                        contentColor = Color.White
+                val color = if (isBgGranted) Color(0xFF2E7D32) else Color(0xFFC62828)
+                Text("Background Location", color = color)
+                if (!isBgGranted) {
+                    Button(
+                        onClick = { bgLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFC62828),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("Request")
+                    }
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = "Granted",
+                        tint = Color(0xFF2E7D32)
                     )
-                ) {
-                    Text(if (isBgGranted) "Granted" else "Request")
                 }
             }
         }
         
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+        // 4. Remaining Special Access
         SpecialAccessButton(
             label = "Disable Battery Optimization",
             enabled = (context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).isIgnoringBatteryOptimizations(context.packageName),
@@ -641,46 +870,6 @@ fun PermissionSection(
                 }
                 context.startActivity(intent)
             }
-        )
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-        
-        Text("Special Access", style = MaterialTheme.typography.titleMedium)
-        
-        if (!isAccessibilityServiceEnabled(context)) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        text = "IMPORTANT: PRE-REQUISITE STEP",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Android security requires you to allow Restricted Settings before enabling Remote Control:\n\n" +
-                                "1. Click the \"Enable Remote Control (Accessibility)\" button below and fail the attempt once - THIS IS REQUIRED FOR THE 3 DOTS TO APPEAR IN STEP 5.\n" +
-                                "2. Open the Settings app on your EUD.\n" +
-                                "3. Navigate to Apps.\n" +
-                                "4. Find and tap on EUD Remote Assist.\n" +
-                                "5. On the system App Info screen for EUD Remote Assist, tap the three dots (⋮) in the top-right corner.\n" +
-                                "6. Select Allow restricted settings.\n" +
-                                "7. (Optional) Verify identity (biometrics or PIN).\n" +
-                                "8. Return here and click the button below again.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                }
-            }
-        }
-
-        SpecialAccessButton(
-            label = "Enable Remote Control (Accessibility)",
-            enabled = isAccessibilityServiceEnabled(context),
-            hint = "Fail the enable attempt first to reveal the 3-dot menu. Then click \"installed apps\" -> \"Remote Assist Remote Control\" -> ON \"allow\"",
-            onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         )
 
         SpecialAccessButton(
@@ -733,49 +922,9 @@ fun PermissionSection(
                 Toast.makeText(context, if (isBootEnabled) "Will start on boot" else "Will NOT start on boot", Toast.LENGTH_SHORT).show()
             }
         )
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-        if (!isRegistered) {
-            Button(
-                onClick = onRegister,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isRegistering && allPermissionsGranted,
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
-            ) {
-                if (isRegistering) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onTertiary)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Registering...")
-                } else {
-                    Text("Register with Management Server")
-                }
-            }
-            if (!allPermissionsGranted) {
-                Text(
-                    "Note: All system permissions above must be granted before registration.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            if (registrationError != null) {
-                Text(
-                    text = registrationError,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
-        } else {
-            Text(
-                "Device Registered", 
-                color = MaterialTheme.colorScheme.primary, 
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            )
-        }
     }
 }
+
 
 @Composable
 fun SpecialAccessButton(label: String, enabled: Boolean, hint: String? = null, onClick: () -> Unit) {
@@ -864,6 +1013,7 @@ fun SettingsPanel(configManager: ManagedConfigManager, onReRegister: () -> Unit,
                         if (!isUrlManaged) configManager.setManualServerUrl(manualUrl)
                         if (!isAgencyManaged) configManager.setManualAgency(manualAgency)
                         Toast.makeText(context, "Settings Saved", Toast.LENGTH_SHORT).show()
+                        onLock()
                     }
                 ) {
                     Text("Save Config")

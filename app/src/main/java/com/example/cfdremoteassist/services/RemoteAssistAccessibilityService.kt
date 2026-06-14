@@ -39,6 +39,7 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
                 serviceHandler.postDelayed(autoAcceptRunnable, 200)
                 serviceHandler.postDelayed(autoAcceptRunnable, 500)
                 serviceHandler.postDelayed(autoAcceptRunnable, 1000)
+                serviceHandler.postDelayed(autoAcceptRunnable, 2000)
             }
         }
     }
@@ -50,36 +51,153 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
         checkAndDismissLockScreen(root)
     }
 
+    private var lastSwipeTime = 0L
+
     private fun checkAndDismissLockScreen(node: AccessibilityNodeInfo?) {
         if (node == null) return
         
-        val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+        val keyguardManager = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
         val isLocked = keyguardManager.isKeyguardLocked
         
         if (!isLocked) return
 
-        // Only auto-dismiss if a session was recently started or is active
-        if (!RemoteSessionManager.isSessionActive) {
-            // We could also check a timestamp here if needed
+        // Anti-bounce: Don't swipe more than once every 3 seconds
+        if (System.currentTimeMillis() - lastSwipeTime < 3000) {
             return
         }
-        
+
+        // Only auto-dismiss if a session was recently started or is active
+        if (!RemoteSessionManager.isSessionActive) {
+            return
+        }
+
+        // Check package names - Lock screen is in systemui
         val packageName = node.packageName?.toString() ?: ""
-        if (packageName.contains("systemui")) {
+        if (packageName.contains("systemui") || packageName.contains("android") || packageName.isEmpty()) {
             val metrics = resources.displayMetrics
             val middleX = metrics.widthPixels / 2f
-            val startY = metrics.heightPixels * 0.8f
-            val endY = metrics.heightPixels * 0.2f
             
-            Log.d("AccessibilityService", "Lock screen detected while session active. Attempting swipe up.")
+            // Aggressive swipe: start very low, end very high
+            val startY = metrics.heightPixels * 0.9f
+            val endY = metrics.heightPixels * 0.1f
+            
+            Log.d("AccessibilityService", "Lock screen detected while session active. Attempting aggressive swipe up.")
             
             val swipePath = Path().apply {
                 moveTo(middleX, startY)
                 lineTo(middleX, endY)
             }
+            
+            // Duration matters: 200ms is a fast flick. 
             val gestureBuilder = GestureDescription.Builder()
-            gestureBuilder.addStroke(GestureDescription.StrokeDescription(swipePath, 0, 300))
-            dispatchGesture(gestureBuilder.build(), null, null)
+            gestureBuilder.addStroke(GestureDescription.StrokeDescription(swipePath, 0, 200))
+            
+            lastSwipeTime = System.currentTimeMillis()
+
+            dispatchGesture(gestureBuilder.build(), object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    super.onCompleted(gestureDescription)
+                    Log.d("AccessibilityService", "Swipe gesture completed")
+                }
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    super.onCancelled(gestureDescription)
+                    Log.w("AccessibilityService", "Swipe gesture cancelled")
+                }
+            }, null)
+        }
+    }
+
+    fun performRemoteUnlock(pin: String) {
+        Log.i("AccessibilityService", "Initiating remote unlock sequence")
+        
+        // 1. Swipe up to reveal PIN pad
+        val metrics = resources.displayMetrics
+        val middleX = metrics.widthPixels / 2f
+        val startY = metrics.heightPixels * 0.8f
+        val endY = metrics.heightPixels * 0.2f
+        
+        val swipePath = Path().apply {
+            moveTo(middleX, startY)
+            lineTo(middleX, endY)
+        }
+        val swipeGesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(swipePath, 0, 200))
+            .build()
+            
+        dispatchGesture(swipeGesture, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                super.onCompleted(gestureDescription)
+                Log.d("AccessibilityService", "Manual remote unlock swipe completed")
+                // 2. Wait for PIN pad to animate in, then enter digits
+                serviceHandler.postDelayed({
+                    enterPinDigits(pin)
+                }, 800)
+            }
+        }, null)
+    }
+
+    private fun enterPinDigits(pin: String, index: Int = 0) {
+        if (index >= pin.length) {
+            // 3. Finalize entry (Click Enter/Done if needed)
+            serviceHandler.postDelayed({
+                rootInActiveWindow?.let { finalizePinEntry(it) }
+            }, 500)
+            return
+        }
+
+        val root = rootInActiveWindow
+        if (root == null) {
+            Log.e("AccessibilityService", "Root is null during PIN entry")
+            return
+        }
+
+        val digit = pin[index]
+        val digitString = digit.toString()
+        val nodes = root.findAccessibilityNodeInfosByText(digitString)
+        
+        var clicked = false
+        for (node in nodes) {
+            // Verify it's a keypad button (usually in systemui)
+            if (node.isClickable && node.packageName?.contains("systemui") == true) {
+                node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                clicked = true
+                break
+            }
+        }
+        
+        if (!clicked) {
+            Log.w("AccessibilityService", "Could not find button for digit: $digit")
+        }
+
+        // Schedule next digit
+        serviceHandler.postDelayed({
+            enterPinDigits(pin, index + 1)
+        }, 200)
+    }
+
+    private fun finalizePinEntry(root: AccessibilityNodeInfo) {
+        // Some devices auto-unlock after the last digit, others need an 'Enter' click.
+        val finalizeButtons = listOf("Enter", "Done", "OK", "checkmark")
+        val finalizeIds = listOf("android:id/button1", "com.android.systemui:id/key_enter")
+        
+        for (id in finalizeIds) {
+            val nodes = root.findAccessibilityNodeInfosByViewId(id)
+            for (node in nodes) {
+                if (node.isClickable) {
+                    node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    return
+                }
+            }
+        }
+
+        for (text in finalizeButtons) {
+            val nodes = root.findAccessibilityNodeInfosByText(text)
+            for (node in nodes) {
+                if (node.isClickable) {
+                    node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    return
+                }
+            }
         }
     }
 

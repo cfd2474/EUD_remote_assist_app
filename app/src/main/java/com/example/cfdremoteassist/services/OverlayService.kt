@@ -27,20 +27,28 @@ class OverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(100, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
             startForeground(100, createNotification())
         }
+    }
 
-        showOverlays()
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ScreenShareService.ACTION_STOP) {
+            stopSelf()
+        } else {
+            showOverlays()
+        }
+        return START_STICKY
     }
 
     @SuppressLint("InternalInsetResource", "DiscouragedApi")
     private fun showOverlays() {
-        // 1. Status Bar Overlay (Light Blue)
+        if (statusBarOverlay != null) return // Already showing
+
         val statusBarHeightId = resources.getIdentifier("status_bar_height", "dimen", "android")
         val statusBarHeight = if (statusBarHeightId > 0) resources.getDimensionPixelSize(statusBarHeightId) else 100
 
@@ -57,10 +65,9 @@ class OverlayService : Service() {
         statusBarParams.gravity = Gravity.TOP
 
         statusBarOverlay = View(this).apply {
-            setBackgroundColor(Color.parseColor("#80ADD8E6")) // Light Blue with 50% alpha to keep icons visible
+            setBackgroundColor(Color.parseColor("#80ADD8E6")) // Light Blue with 50% alpha
         }
 
-        // 2. "Remote Assist" Banner
         val bannerParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -69,10 +76,10 @@ class OverlayService : Service() {
             PixelFormat.TRANSLUCENT
         )
         bannerParams.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-        bannerParams.y = statusBarHeight + 10 // Just below status bar
+        bannerParams.y = statusBarHeight + 10
 
         val bannerView = FrameLayout(this).apply {
-            setBackgroundColor(Color.parseColor("#FFADD8E6")) // Solid Light Blue
+            setBackgroundColor(Color.parseColor("#FFADD8E6"))
             setPadding(20, 10, 20, 10)
         }
         val textView = TextView(this).apply {
@@ -86,29 +93,27 @@ class OverlayService : Service() {
         try {
             windowManager?.addView(statusBarOverlay, statusBarParams)
             windowManager?.addView(bannerOverlay, bannerParams)
-        } catch (e: Exception) {
-            stopSelf()
-        }
+        } catch (e: Exception) {}
     }
 
     private fun createNotification(): Notification {
         val channelId = "overlay_service_channel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "Active Remote Session", NotificationManager.IMPORTANCE_LOW)
+            val channel = NotificationChannel(channelId, "Indicator Service", NotificationManager.IMPORTANCE_LOW)
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
         return NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Remote Administration Active")
-            .setContentText("A remote administrator is currently managing this device.")
+            .setContentTitle("EUD Remote Assist Overlay")
+            .setContentText("Status indicators and setup assistance.")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .build()
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        statusBarOverlay?.let { windowManager?.removeView(it) }
-        bannerOverlay?.let { windowManager?.removeView(it) }
+        statusBarOverlay?.let { try { windowManager?.removeView(it) } catch (e: Exception) {} }
+        bannerOverlay?.let { try { windowManager?.removeView(it) } catch (e: Exception) {} }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
