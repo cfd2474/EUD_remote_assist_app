@@ -30,7 +30,7 @@ class ManagedConfigManager(context: Context) {
 
     fun getTrackingServerUrl(): String {
         val appRestrictions: Bundle = restrictionsManager.applicationRestrictions
-        val managedUrl = appRestrictions.getString("registration_server_url")
+        val managedUrl = appRestrictions.getString("tracking_server_url")
         if (!managedUrl.isNullOrEmpty()) {
             return managedUrl.trimEnd('/')
         }
@@ -39,7 +39,7 @@ class ManagedConfigManager(context: Context) {
 
     fun isServerUrlManaged(): Boolean {
         val appRestrictions: Bundle = restrictionsManager.applicationRestrictions
-        return !appRestrictions.getString("registration_server_url").isNullOrEmpty()
+        return !appRestrictions.getString("tracking_server_url").isNullOrEmpty()
     }
 
     fun setManualServerUrl(url: String) {

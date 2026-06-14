@@ -5,8 +5,8 @@
 
     <string name="settings_password_title">Settings Password</string>
     <string name="settings_password_desc">Password to access the settings page</string>
-    <string name="registration_server_url_title">Registration Server URL</string>
-    <string name="registration_server_url_desc">URL of the server for device registration and assistance</string>
+    <string name="tracking_server_url_title">Tracking Server URL</string>
+    <string name="tracking_server_url_desc">URL of the server for device registration and assistance (e.g., https://remote.tak-solutions.com:8448)</string>
     <string name="tracking_interval_title">Tracking Interval (minutes)</string>
     <string name="tracking_interval_desc">Interval in minutes for sending location updates</string>
     <string name="agency_title">Agency</string>

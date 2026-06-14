@@ -57,9 +57,16 @@ class NetworkManager private constructor(private val context: Context, private v
                     try {
                         val jsonObject = gson.fromJson(responseBody, JsonObject::class.java)
                         val secret = jsonObject.get("connection_secret")?.asString
+                        val serverUrl = jsonObject.get("tracking_server_url")?.asString
+                        
                         if (!secret.isNullOrEmpty()) {
                             configManager.setConnectionSecret(secret)
                             configManager.setRegistered(true)
+                            
+                            if (!serverUrl.isNullOrEmpty()) {
+                                configManager.setManualServerUrl(serverUrl)
+                            }
+
                             callback(true, null)
                         } else {
                             callback(false, "Server response missing connection secret")

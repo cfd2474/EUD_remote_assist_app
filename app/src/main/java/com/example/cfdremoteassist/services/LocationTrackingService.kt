@@ -13,7 +13,6 @@ import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.RestrictionsManager
 import android.content.pm.ServiceInfo
 import android.location.Location
 import android.media.AudioAttributes
@@ -50,7 +49,6 @@ class LocationTrackingService : Service() {
     private lateinit var locationCallback: LocationCallback
     private lateinit var configManager: ManagedConfigManager
     private lateinit var networkManager: NetworkManager
-    private var trackingServerUrl: String? = null
     private var trackingIntervalMinutes: Int = 15
 
     private var ringtone: Ringtone? = null
@@ -376,13 +374,8 @@ class LocationTrackingService : Service() {
     }
 
     private fun loadManagedConfigurations() {
-        val restrictionsManager = getSystemService(RESTRICTIONS_SERVICE) as RestrictionsManager
-        val appRestrictions = restrictionsManager.applicationRestrictions
-        
-        trackingServerUrl = appRestrictions.getString("tracking_server_url", "https://example.com/track")
-        trackingIntervalMinutes = appRestrictions.getInt("tracking_interval", 15)
-        
-        Log.d("LocationTracking", "Config loaded: URL=$trackingServerUrl, Interval=$trackingIntervalMinutes")
+        trackingIntervalMinutes = configManager.getTrackingInterval()
+        Log.d("LocationTracking", "Config loaded: URL=${configManager.getTrackingServerUrl()}, Interval=$trackingIntervalMinutes")
     }
 
     @SuppressLint("MissingPermission")

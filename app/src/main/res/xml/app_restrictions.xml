@@ -9,10 +9,10 @@
         android:defaultValue="" />
 
     <restriction
-        android:key="registration_server_url"
-        android:title="@string/registration_server_url_title"
+        android:key="tracking_server_url"
+        android:title="@string/tracking_server_url_title"
         android:restrictionType="string"
-        android:description="@string/registration_server_url_desc"
+        android:description="@string/tracking_server_url_desc"
         android:defaultValue="" />
 
     <restriction
