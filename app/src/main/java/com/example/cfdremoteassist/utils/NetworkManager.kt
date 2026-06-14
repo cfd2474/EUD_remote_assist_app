@@ -1,6 +1,7 @@
 package com.example.cfdremoteassist.utils
 
 import android.content.Context
+import android.provider.Settings
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
@@ -36,6 +37,7 @@ class NetworkManager private constructor(private val context: Context, private v
 
         val url = "$baseUrl/api/v1/register"
         val json = gson.toJson(deviceInfo)
+        Log.i("NetworkManager", "Registering device with payload: $json")
         val body = json.toRequestBody(jsonMediaType)
 
         val request = Request.Builder()
@@ -68,6 +70,36 @@ class NetworkManager private constructor(private val context: Context, private v
                 } else {
                     callback(false, "Server error: ${response.code}")
                 }
+            }
+        })
+    }
+
+    fun sendEvent(event: String, payload: Map<String, Any> = emptyMap()) {
+        val baseUrl = configManager.getTrackingServerUrl()
+        val secret = configManager.getConnectionSecret()
+        if (baseUrl.isEmpty() || secret.isEmpty()) return
+
+        val url = "$baseUrl/api/v1/event"
+        val bodyMap = mutableMapOf<String, Any>()
+        bodyMap["uid"] = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+        bodyMap["event"] = event
+        bodyMap["payload"] = payload
+
+        val json = gson.toJson(bodyMap)
+        val body = json.toRequestBody(jsonMediaType)
+
+        val request = Request.Builder()
+            .url(url)
+            .post(body)
+            .addHeader("X-Connection-Secret", secret)
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e("NetworkManager", "Event failed: ${e.message}")
+            }
+            override fun onResponse(call: Call, response: Response) {
+                response.close()
             }
         })
     }

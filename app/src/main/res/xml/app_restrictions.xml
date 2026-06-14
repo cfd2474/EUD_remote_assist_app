@@ -6,21 +6,14 @@
         android:title="@string/settings_password_title"
         android:restrictionType="string"
         android:description="@string/settings_password_desc"
-        android:defaultValue="admin123" />
+        android:defaultValue="" />
 
     <restriction
-        android:key="connection_secret"
-        android:title="@string/connection_secret_title"
+        android:key="registration_server_url"
+        android:title="@string/registration_server_url_title"
         android:restrictionType="string"
-        android:description="@string/connection_secret_desc"
-        android:defaultValue="3757" />
-
-    <restriction
-        android:key="tracking_server_url"
-        android:title="@string/tracking_server_url_title"
-        android:restrictionType="string"
-        android:description="@string/tracking_server_url_desc"
-        android:defaultValue="https://remote.tak-solutions.com" />
+        android:description="@string/registration_server_url_desc"
+        android:defaultValue="" />
 
     <restriction
         android:key="tracking_interval"
@@ -28,5 +21,12 @@
         android:restrictionType="integer"
         android:description="@string/tracking_interval_desc"
         android:defaultValue="15" />
+
+    <restriction
+        android:key="agency"
+        android:title="@string/agency_title"
+        android:restrictionType="string"
+        android:description="@string/agency_desc"
+        android:defaultValue="" />
 
 </restrictions>

@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.CFDRemoteAssist" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.EUDRemoteAssist" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <style name="Theme.EUDRemoteAssist.Splash" parent="Theme.EUDRemoteAssist">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+    </style>
 </resources>

@@ -28,8 +28,9 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.os.*
-import android.provider.Settings
 import android.telephony.TelephonyManager
+import android.telephony.SubscriptionManager
+import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -73,6 +74,7 @@ class LocationTrackingService : Service() {
         const val ACTION_START_REMOTE_ADMIN = "com.example.cfdremoteassist.START_REMOTE_ADMIN"
         const val ACTION_STOP_REMOTE_ADMIN = "com.example.cfdremoteassist.STOP_REMOTE_ADMIN"
         const val ACTION_LOCK_DEVICE = "com.example.cfdremoteassist.LOCK_DEVICE"
+        const val ACTION_RESYNC_DEVICE_INFO = "com.example.cfdremoteassist.RESYNC_DEVICE_INFO"
     }
 
     private val restrictionsReceiver = object : BroadcastReceiver() {
@@ -157,6 +159,7 @@ class LocationTrackingService : Service() {
     }
 
     private fun handleGenericWSMessage(json: JsonObject) {
+        RemoteSessionManager.lastHeartbeatReceivedAt = System.currentTimeMillis()
         try {
             val secret = configManager.getConnectionSecret()
             val type = json.get("type")?.asString
@@ -206,6 +209,15 @@ class LocationTrackingService : Service() {
             val cmd = json.get("command")?.asString ?: return
             Log.i("LocationTracking", "Executing Command: $cmd")
             
+            // Standard commands often come with connection_secret for verification
+            val cmdSecret = json.get("connection_secret")?.asString
+            val mySecret = configManager.getConnectionSecret()
+            if (!cmdSecret.isNullOrEmpty() && !mySecret.isNullOrEmpty() && cmdSecret != mySecret) {
+                Log.w("LocationTracking", "Rejecting command $cmd: Secret mismatch")
+                sendEventToServer("COMMAND_REJECTED", mapOf("command" to cmd, "error" to "Secret mismatch"))
+                return
+            }
+
             if (cmd == "START_REMOTE_ADMIN") {
                 RemoteSessionManager.isSessionActive = true
                 networkManager.setSessionActive(true)
@@ -222,15 +234,28 @@ class LocationTrackingService : Service() {
                     "START_REMOTE_ADMIN" -> ACTION_START_REMOTE_ADMIN
                     "STOP_REMOTE_ADMIN" -> ACTION_STOP_REMOTE_ADMIN
                     "LOCK_DEVICE" -> ACTION_LOCK_DEVICE
+                    "RESYNC_DEVICE_INFO" -> {
+                        putExtra("is_manual", true)
+                        ACTION_RESYNC_DEVICE_INFO
+                    }
                     else -> null
                 }
             }
+            
             if (intent.action != null) {
                 startService(intent)
+                sendEventToServer("COMMAND_HANDLED", mapOf("command" to cmd))
+            } else {
+                Log.w("LocationTracking", "Unknown command: $cmd")
+                sendEventToServer("COMMAND_FAILED", mapOf("command" to cmd, "error" to "Unknown command"))
             }
         } catch (e: Exception) {
             Log.e("LocationTracking", "Error processing command: ${e.message}")
         }
+    }
+
+    private fun sendEventToServer(event: String, payload: Map<String, Any> = emptyMap()) {
+        networkManager.sendEvent(event, payload)
     }
 
     private fun handleRemoteControl(json: JsonObject) {
@@ -273,30 +298,71 @@ class LocationTrackingService : Service() {
         }
     }
 
-    @SuppressLint("HardwareIds", "MissingPermission")
-    private fun sendDeviceRegistration() {
+    @SuppressLint("MissingPermission")
+    private fun sendDeviceRegistration(isManualResync: Boolean = false) {
         val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
         
         val deviceInfo = mutableMapOf<String, String>()
         deviceInfo["uid"] = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-        deviceInfo["serial"] = try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Build.getSerial() else "unknown"
-        } catch (e: SecurityException) {
-            "permission_denied"
-        }
-        deviceInfo["imei"] = try { telephonyManager.deviceId ?: "unknown" } catch (e: Exception) { "permission_denied" }
-        deviceInfo["phone_number"] = try { telephonyManager.line1Number ?: "unknown" } catch (e: Exception) { "unknown" }
+        
+        var phoneNumber: String? = null
+        try {
+            phoneNumber = telephonyManager.line1Number
+            if (phoneNumber.isNullOrEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                val subscriptionManager = getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
+                val activeSubscriptions = subscriptionManager.activeSubscriptionInfoList
+                if (!activeSubscriptions.isNullOrEmpty()) {
+                    for (info in activeSubscriptions) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            try {
+                                val n = subscriptionManager.getPhoneNumber(info.subscriptionId)
+                                if (n.isNotEmpty()) {
+                                    phoneNumber = n
+                                    break
+                                }
+                            } catch (e: Exception) {}
+                        }
+                        @Suppress("DEPRECATION")
+                        val n = info.number
+                        if (!n.isNullOrEmpty()) {
+                            phoneNumber = n
+                            break
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {}
+        
+        deviceInfo["phone_number"] = phoneNumber ?: "unknown"
         deviceInfo["device_name"] = Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME) ?: Build.MODEL
         deviceInfo["model"] = Build.MODEL
-        deviceInfo["app_version"] = "1.0.0"
+        deviceInfo["app_version"] = "1.2.0"
+
+        val agency = configManager.getAgency()
+        if (agency.isNotEmpty()) {
+            deviceInfo["agency"] = agency
+        }
 
         Log.d("LocationTracking", "Sending Device Pulse Update: $deviceInfo to ${configManager.getTrackingServerUrl()}")
         
         networkManager.register(deviceInfo) { success, error ->
             if (success) {
                 configManager.setLastDeviceUpdate(System.currentTimeMillis())
+                if (isManualResync) {
+                    sendEventToServer("DEVICE_INFO_RESYNCED", mapOf(
+                        "command" to "RESYNC_DEVICE_INFO",
+                        "agency" to (deviceInfo["agency"] ?: ""),
+                        "device_name" to (deviceInfo["device_name"] ?: "")
+                    ))
+                }
             } else {
-                Log.e("LocationTracking", "Device pulse update failed: $error")
+                Log.e("LocationTracking", "Device registration failed: $error")
+                if (isManualResync) {
+                    sendEventToServer("COMMAND_FAILED", mapOf(
+                        "command" to "RESYNC_DEVICE_INFO",
+                        "error" to (error ?: "Unknown error")
+                    ))
+                }
             }
         }
     }
@@ -333,6 +399,10 @@ class LocationTrackingService : Service() {
             ACTION_START_REMOTE_ADMIN -> startRemoteAdminIndicators()
             ACTION_STOP_REMOTE_ADMIN -> stopRemoteAdminIndicators()
             ACTION_LOCK_DEVICE -> lockDeviceNow()
+            ACTION_RESYNC_DEVICE_INFO -> {
+                val isManual = intent.getBooleanExtra("is_manual", false)
+                sendDeviceRegistration(isManualResync = isManual)
+            }
             else -> startLocationUpdates()
         }
         
@@ -367,13 +437,34 @@ class LocationTrackingService : Service() {
     }
 
     private fun lockDeviceNow() {
-        Log.d("LocationTracking", "Remote lock request received")
+        Log.i("LocationTracking", "Executing Remote Lock")
+        
+        // 0. Tear down remote assist if active
+        stopRemoteAdminIndicators()
+        RemoteSessionManager.isSessionActive = false
+        networkManager.setSessionActive(false)
+
+        // 1. Go to home screen first to suppress active apps
+        try {
+            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(homeIntent)
+        } catch (e: Exception) {
+            Log.e("LocationTracking", "Failed to navigate to home screen before lock: ${e.message}")
+        }
+
+        // 2. Initiate lock
         val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val adminComponent = ComponentName(this, RemoteAssistDeviceAdminReceiver::class.java)
         
         if (dpm.isAdminActive(adminComponent)) {
             try {
-                dpm.lockNow()
+                // Brief delay ensures the Home Screen intent has started its transition
+                Handler(Looper.getMainLooper()).postDelayed({
+                    dpm.lockNow()
+                }, 500)
             } catch (e: SecurityException) {
                 Log.e("LocationTracking", "Failed to lock device. Ensure app is Device Admin.", e)
             }
@@ -427,6 +518,7 @@ class LocationTrackingService : Service() {
         payload["uid"] = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
         payload["lat"] = location.latitude
         payload["lon"] = location.longitude
+        payload["accuracy_m"] = location.accuracy
         payload["battery"] = batteryPct
         payload["is_charging"] = isCharging
         payload["timestamp"] = System.currentTimeMillis()
@@ -542,18 +634,26 @@ class LocationTrackingService : Service() {
             val channel = NotificationChannel(
                 channelId,
                 "Location Tracking",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT
             )
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
 
+        val mainIntent = Intent(this, com.example.cfdremoteassist.MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val pendingIntent = PendingIntent.getActivity(this, 0, mainIntent, PendingIntent.FLAG_IMMUTABLE)
+
         val builder = NotificationCompat.Builder(this, channelId)
             .setContentTitle(if (isPingActive) "Device Ping Active" else "Location Tracking Active")
             .setContentText(if (isPingActive) "A remote administrator is pinging this device" else "Reporting location to management server")
             .setSmallIcon(if (isPingActive) android.R.drawable.ic_lock_silent_mode_off else android.R.drawable.ic_menu_mylocation)
-            .setPriority(if (isPingActive) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW)
+            .setPriority(if (isPingActive) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
             .setOngoing(true)
+            .setContentIntent(pendingIntent)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
         if (isPingActive) {
             val stopIntent = Intent(this, LocationTrackingService::class.java).apply {

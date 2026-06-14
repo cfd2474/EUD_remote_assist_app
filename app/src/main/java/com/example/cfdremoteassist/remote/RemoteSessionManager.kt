@@ -8,4 +8,6 @@ object RemoteSessionManager {
     var displayHeight: Int = 1920
     
     var isSessionActive: Boolean = false
+    
+    var lastHeartbeatReceivedAt: Long = 0L
 }

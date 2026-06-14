@@ -364,7 +364,11 @@ class ScreenShareService : Service() {
             override fun onRemoveStream(stream: MediaStream) {}
             override fun onDataChannel(channel: DataChannel) {}
             override fun onRenegotiationNeeded() {
-                Log.d("ScreenShare", "Renegotiation Needed - Waiting for portal offer")
+                Log.d("ScreenShare", "Renegotiation Needed - Triggering new offer from portal")
+                val readyJson = JsonObject().apply {
+                    addProperty("type", "webrtc_ready")
+                }
+                networkManager.sendWebSocketMessage(gson.toJson(readyJson))
             }
             override fun onAddTrack(receiver: RtpReceiver, mediaStreams: Array<out MediaStream>) {}
         })

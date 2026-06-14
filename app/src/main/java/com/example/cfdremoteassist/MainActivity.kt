@@ -20,8 +20,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -34,12 +36,15 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import android.app.Activity
 import android.app.KeyguardManager
+import android.content.ComponentName
 import android.media.projection.MediaProjectionConfig
 import android.media.projection.MediaProjectionManager
 import android.view.WindowManager
+import com.example.cfdremoteassist.receivers.RemoteAssistDeviceAdminReceiver
+import com.example.cfdremoteassist.remote.RemoteSessionManager
 import com.example.cfdremoteassist.services.LocationTrackingService
 import com.example.cfdremoteassist.services.ScreenShareService
-import com.example.cfdremoteassist.ui.theme.CFDRemoteAssistTheme
+import com.example.cfdremoteassist.ui.theme.EUDRemoteAssistTheme
 import com.example.cfdremoteassist.utils.ManagedConfigManager
 import com.example.cfdremoteassist.utils.NetworkManager
 
@@ -65,20 +70,72 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            CFDRemoteAssistTheme {
-                MainScreen()
+            EUDRemoteAssistTheme {
+                MainScreen(this)
             }
         }
+    }
+
+
+    fun getPhoneNumber(context: Context): String? {
+        try {
+            val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as android.telephony.TelephonyManager
+            
+            // 1. Try TelephonyManager.line1Number (Requires READ_PHONE_STATE or READ_PHONE_NUMBERS)
+            @Suppress("MissingPermission")
+            var number = telephonyManager.line1Number
+            
+            // 2. If null, try SubscriptionManager (Modern way for multi-SIM)
+            if (number.isNullOrEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                val subscriptionManager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as android.telephony.SubscriptionManager
+                @Suppress("MissingPermission")
+                val activeSubscriptions = subscriptionManager.activeSubscriptionInfoList
+                if (!activeSubscriptions.isNullOrEmpty()) {
+                    for (info in activeSubscriptions) {
+                        // API 33+ uses getPhoneNumber
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            try {
+                                @Suppress("MissingPermission")
+                                val n = subscriptionManager.getPhoneNumber(info.subscriptionId)
+                                if (n.isNotEmpty()) {
+                                    number = n
+                                    break
+                                }
+                            } catch (e: Exception) {}
+                        }
+                        
+                        // Fallback to deprecated number property
+                        @Suppress("DEPRECATION")
+                        val n = info.number
+                        if (!n.isNullOrEmpty()) {
+                            number = n
+                            break
+                        }
+                    }
+                }
+            }
+
+            if (!number.isNullOrEmpty()) {
+                Log.i("MainActivity", "Phone number acquired successfully")
+                return number
+            } else {
+                Log.d("MainActivity", "Phone number is null or empty after all attempts")
+            }
+        } catch (e: Exception) {
+            Log.d("MainActivity", "Phone number acquisition failed: ${e.message}")
+        }
+        return null
     }
 }
 
 @Composable
-fun MainScreen() {
+fun MainScreen(activity: MainActivity) {
     val context = LocalContext.current
     val configManager = remember { ManagedConfigManager(context) }
     val networkManager = remember { NetworkManager.getInstance(context, configManager) }
     var isSettingsUnlocked by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
+    var showSetPasswordDialog by remember { mutableStateOf(false) }
     
     var isRegistered by remember { mutableStateOf(configManager.isRegistered()) }
     var isRegistering by remember { mutableStateOf(false) }
@@ -160,7 +217,18 @@ fun MainScreen() {
         val deviceInfo = mutableMapOf<String, String>()
         deviceInfo["uid"] = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
         deviceInfo["model"] = Build.MODEL
-        deviceInfo["app_version"] = "1.0.0"
+        deviceInfo["app_version"] = "1.2.0"
+        
+        val agency = configManager.getAgency()
+        if (agency.isNotEmpty()) {
+            deviceInfo["agency"] = agency
+        }
+        
+        val phoneNumber = activity.getPhoneNumber(context)
+        if (phoneNumber != null) {
+            deviceInfo["phone_number"] = phoneNumber
+        }
+
         try {
             deviceInfo["device_name"] = Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME) ?: Build.MODEL
         } catch (e: Exception) {}
@@ -190,18 +258,15 @@ fun MainScreen() {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(text = "CFD Remote Assist Status", style = MaterialTheme.typography.headlineMedium)
+            Text(text = "EUD Remote Assist Status", style = MaterialTheme.typography.headlineMedium)
             
             key(refreshTrigger, isRegistered) {
                 PermissionSection(
+                    configManager = configManager,
                     isRegistered = isRegistered,
                     isRegistering = isRegistering,
                     registrationError = registrationError,
-                    onRegister = { performRegistration() },
-                    onStartScreenShare = {
-                        val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                        screenCaptureLauncher.launch(projectionManager.createScreenCaptureIntent())
-                    }
+                    onRegister = { performRegistration() }
                 )
 
                 ServiceStatusSection(onRefresh = { refreshTrigger++ })
@@ -218,21 +283,45 @@ fun MainScreen() {
                     isSettingsUnlocked = false
                 }
             } else {
-                Button(onClick = { showPasswordDialog = true }) {
-                    Text("Unlock Settings")
+                Button(onClick = { 
+                    if (configManager.isPasswordSet()) {
+                        showPasswordDialog = true 
+                    } else {
+                        showSetPasswordDialog = true
+                    }
+                }) {
+                    Text("Server Configuration Settings")
                 }
             }
         }
     }
 
     if (showPasswordDialog) {
-        PasswordEntryDialog(
-            correctPassword = configManager.getSettingsPassword(),
-            onDismiss = { showPasswordDialog = false },
-            onSuccess = {
+        val password = configManager.getSettingsPassword()
+        if (password != null) {
+            PasswordEntryDialog(
+                correctPassword = password,
+                onDismiss = { showPasswordDialog = false },
+                onSuccess = {
+                    isSettingsUnlocked = true
+                    showPasswordDialog = false
+                    Toast.makeText(context, "Settings Unlocked", Toast.LENGTH_SHORT).show()
+                }
+            )
+        } else {
+            showPasswordDialog = false
+            showSetPasswordDialog = true
+        }
+    }
+
+    if (showSetPasswordDialog) {
+        SetPasswordDialog(
+            onDismiss = { showSetPasswordDialog = false },
+            onSuccess = { newPassword ->
+                configManager.setManualPassword(newPassword)
+                showSetPasswordDialog = false
                 isSettingsUnlocked = true
-                showPasswordDialog = false
-                Toast.makeText(context, "Settings Unlocked", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Password Set & Settings Unlocked", Toast.LENGTH_SHORT).show()
             }
         )
     }
@@ -242,6 +331,20 @@ fun MainScreen() {
 fun ServiceStatusSection(onRefresh: () -> Unit) {
     val context = LocalContext.current
     
+    // Heartbeat timer
+    var currentTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000)
+            currentTime = System.currentTimeMillis()
+        }
+    }
+
+    val lastHeartbeat = RemoteSessionManager.lastHeartbeatReceivedAt
+    val secondsAgo = if (lastHeartbeat > 0) (currentTime - lastHeartbeat) / 1000 else -1
+    val heartbeatText = if (secondsAgo < 0) "Never" else "${secondsAgo}s ago"
+    val isHeartbeatHealthy = secondsAgo in 0..60
+
     Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -254,6 +357,7 @@ fun ServiceStatusSection(onRefresh: () -> Unit) {
             }
         }
         
+        StatusItem("Last Heartbeat", isHeartbeatHealthy, heartbeatText)
         StatusItem("Accessibility", isAccessibilityServiceEnabled(context))
         StatusItem("Notification Listener", isNotificationServiceEnabled(context))
         StatusItem("Overlay (Draw on screen)", Settings.canDrawOverlays(context))
@@ -268,7 +372,6 @@ fun ServiceStatusSection(onRefresh: () -> Unit) {
 fun DiagnosticsSection(networkManager: NetworkManager) {
     val context = LocalContext.current
     var isPinging by remember { mutableStateOf(false) }
-    var isAdminActive by remember { mutableStateOf(false) }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -311,47 +414,21 @@ fun DiagnosticsSection(networkManager: NetworkManager) {
                 Text("Ping Management Server")
             }
         }
-
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            onClick = {
-                isAdminActive = !isAdminActive
-                val action = if (isAdminActive) LocationTrackingService.ACTION_START_REMOTE_ADMIN 
-                             else LocationTrackingService.ACTION_STOP_REMOTE_ADMIN
-                val intent = Intent(context, LocationTrackingService::class.java).apply {
-                    this.action = action
-                }
-                context.startService(intent)
-            }
-        ) {
-            Text(if (isAdminActive) "End Remote Admin Mode" else "Start Remote Admin Mode")
-        }
-
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            onClick = {
-                val intent = Intent(context, LocationTrackingService::class.java).apply {
-                    action = LocationTrackingService.ACTION_LOCK_DEVICE
-                }
-                context.startService(intent)
-            }
-        ) {
-            Text("Test Remote Lock")
-        }
     }
 }
 
 @Composable
-fun StatusItem(label: String, enabled: Boolean) {
+fun StatusItem(label: String, enabled: Boolean, statusText: String? = null) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         val color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
         Box(modifier = Modifier.size(12.dp).padding(2.dp).padding(end = 4.dp)) 
-        Text(text = "$label: ${if (enabled) "Enabled" else "Disabled"}", color = color)
+        val displayStatus = statusText ?: if (enabled) "Enabled" else "Disabled"
+        Text(text = "$label: $displayStatus", color = color)
     }
 }
 
 fun isAccessibilityServiceEnabled(context: Context): Boolean {
-    val expectedId = android.content.ComponentName(context, com.example.cfdremoteassist.services.RemoteAssistAccessibilityService::class.java).flattenToString()
+    val expectedId = ComponentName(context, com.example.cfdremoteassist.services.RemoteAssistAccessibilityService::class.java).flattenToString()
     val settingValue = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
     val colonSplitter = android.text.TextUtils.SimpleStringSplitter(':')
     colonSplitter.setString(settingValue)
@@ -391,24 +468,28 @@ fun isUsageAccessGranted(context: Context): Boolean {
 
 @Composable
 fun PermissionSection(
+    configManager: ManagedConfigManager,
     isRegistered: Boolean,
     isRegistering: Boolean,
     registrationError: String?,
-    onRegister: () -> Unit,
-    onStartScreenShare: () -> Unit
+    onRegister: () -> Unit
 ) {
     val context = LocalContext.current
     
     val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
-    val adminComponent = android.content.ComponentName(context, com.example.cfdremoteassist.receivers.RemoteAssistDeviceAdminReceiver::class.java)
+    val adminComponent = ComponentName(context, com.example.cfdremoteassist.receivers.RemoteAssistDeviceAdminReceiver::class.java)
     val isDeviceAdminActive = dpm.isAdminActive(adminComponent)
 
     val locationPermissions = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-    val commsPermissions = arrayOf(
+    val commsPermissions = mutableListOf(
         Manifest.permission.READ_PHONE_STATE, Manifest.permission.CALL_PHONE,
         Manifest.permission.READ_SMS, Manifest.permission.SEND_SMS, Manifest.permission.RECEIVE_SMS,
         Manifest.permission.READ_CONTACTS, Manifest.permission.READ_CALL_LOG
-    )
+    ).apply {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            add(Manifest.permission.READ_PHONE_NUMBERS)
+        }
+    }.toTypedArray()
     val mediaPermissions = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA, Manifest.permission.READ_CALENDAR).apply {
         val hasHeartRate = context.packageManager.hasSystemFeature(PackageManager.FEATURE_SENSOR_HEART_RATE)
         if (hasHeartRate) {
@@ -517,8 +598,10 @@ fun PermissionSection(
                     }
                     Button(
                         onClick = { launcher.launch(permissions) },
-                        colors = if (isGranted) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer) 
-                                 else ButtonDefaults.buttonColors()
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isGranted) Color(0xFF2E7D32) else Color(0xFFC62828),
+                            contentColor = Color.White
+                        )
                     ) {
                         Text(if (isGranted) "Granted" else "Request")
                     }
@@ -537,7 +620,13 @@ fun PermissionSection(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Background Location")
-                Button(onClick = { bgLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) }) {
+                Button(
+                    onClick = { bgLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isBgGranted) Color(0xFF2E7D32) else Color(0xFFC62828),
+                        contentColor = Color.White
+                    )
+                ) {
                     Text(if (isBgGranted) "Granted" else "Request")
                 }
             }
@@ -558,9 +647,39 @@ fun PermissionSection(
         
         Text("Special Access", style = MaterialTheme.typography.titleMedium)
         
+        if (!isAccessibilityServiceEnabled(context)) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = "IMPORTANT: PRE-REQUISITE STEP",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Android security requires you to allow Restricted Settings before enabling Remote Control:\n\n" +
+                                "1. Click the \"Enable Remote Control (Accessibility)\" button below and fail the attempt once - THIS IS REQUIRED FOR THE 3 DOTS TO APPEAR IN STEP 5.\n" +
+                                "2. Open the Settings app on your EUD.\n" +
+                                "3. Navigate to Apps.\n" +
+                                "4. Find and tap on EUD Remote Assist.\n" +
+                                "5. On the system App Info screen for EUD Remote Assist, tap the three dots (⋮) in the top-right corner.\n" +
+                                "6. Select Allow restricted settings.\n" +
+                                "7. (Optional) Verify identity (biometrics or PIN).\n" +
+                                "8. Return here and click the button below again.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+        }
+
         SpecialAccessButton(
             label = "Enable Remote Control (Accessibility)",
             enabled = isAccessibilityServiceEnabled(context),
+            hint = "Fail the enable attempt first to reveal the 3-dot menu. Then click \"installed apps\" -> \"Remote Assist Remote Control\" -> ON \"allow\"",
             onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         )
 
@@ -604,14 +723,14 @@ fun PermissionSection(
             }
         )
 
+        var isBootEnabled by remember { mutableStateOf(configManager.isBootStartEnabled()) }
         SpecialAccessButton(
-            label = "Disable Battery Optimization",
-            enabled = (context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).isIgnoringBatteryOptimizations(context.packageName),
+            label = "Enable on Boot",
+            enabled = isBootEnabled,
             onClick = {
-                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                    data = android.net.Uri.parse("package:${context.packageName}")
-                }
-                context.startActivity(intent)
+                isBootEnabled = !isBootEnabled
+                configManager.setBootStartEnabled(isBootEnabled)
+                Toast.makeText(context, if (isBootEnabled) "Will start on boot" else "Will NOT start on boot", Toast.LENGTH_SHORT).show()
             }
         )
 
@@ -648,17 +767,6 @@ fun PermissionSection(
                 )
             }
         } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Screen Capture (Manual Test)")
-                Button(onClick = onStartScreenShare) {
-                    Text("Start")
-                }
-            }
-
             Text(
                 "Device Registered", 
                 color = MaterialTheme.colorScheme.primary, 
@@ -670,22 +778,34 @@ fun PermissionSection(
 }
 
 @Composable
-fun SpecialAccessButton(label: String, enabled: Boolean, onClick: () -> Unit) {
-    Button(
-        modifier = Modifier.fillMaxWidth(),
-        onClick = onClick,
-        colors = if (enabled) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
-                 else ButtonDefaults.buttonColors()
-    ) {
-        Row(
+fun SpecialAccessButton(label: String, enabled: Boolean, hint: String? = null, onClick: () -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Button(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            onClick = onClick,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (enabled) Color(0xFF2E7D32) else Color(0xFFC62828),
+                contentColor = Color.White
+            )
         ) {
-            Text(label)
-            if (enabled) {
-                Icon(imageVector = Icons.Default.Check, contentDescription = "Granted")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(label)
+                if (enabled) {
+                    Icon(imageVector = Icons.Default.Check, contentDescription = "Granted")
+                }
             }
+        }
+        if (hint != null && !enabled) {
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 8.dp, top = 2.dp, bottom = 4.dp)
+            )
         }
     }
 }
@@ -694,46 +814,78 @@ fun SpecialAccessButton(label: String, enabled: Boolean, onClick: () -> Unit) {
 fun SettingsPanel(configManager: ManagedConfigManager, onReRegister: () -> Unit, onLock: () -> Unit) {
     val context = LocalContext.current
     var manualUrl by remember { mutableStateOf(configManager.getTrackingServerUrl()) }
+    var manualAgency by remember { mutableStateOf(configManager.getAgency()) }
+    var showChangePasswordDialog by remember { mutableStateOf(false) }
+
+    // Sync state if MDM policy changes while panel is open
+    val isUrlManaged = configManager.isServerUrlManaged()
+    val isAgencyManaged = configManager.isAgencyManaged()
+    
+    LaunchedEffect(isUrlManaged, isAgencyManaged) {
+        if (isUrlManaged) manualUrl = configManager.getTrackingServerUrl()
+        if (isAgencyManaged) manualAgency = configManager.getAgency()
+    }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Managed Settings", style = MaterialTheme.typography.titleLarge)
             
-            if (configManager.hasManagedConfig()) {
-                val url = configManager.getTrackingServerUrl()
-                Text("Server: ${if (url.isEmpty()) "Not Configured" else url}")
-                Text("Source: MDM Managed Policy", style = MaterialTheme.typography.bodySmall)
-            } else {
-                Text("Server Configuration (Manual):", style = MaterialTheme.typography.titleSmall)
-                TextField(
-                    value = manualUrl,
-                    onValueChange = { manualUrl = it },
-                    label = { Text("Server URL (e.g. https://remote.tak-solutions.com)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Button(onClick = {
-                    configManager.setManualServerUrl(manualUrl)
-                    Toast.makeText(context, "Server URL Saved", Toast.LENGTH_SHORT).show()
-                }) {
-                    Text("Save Server Config")
+            val isUrlManaged = configManager.isServerUrlManaged()
+            val isAgencyManaged = configManager.isAgencyManaged()
+
+            Text("Server Configuration:", style = MaterialTheme.typography.titleSmall)
+            
+            TextField(
+                value = manualUrl,
+                onValueChange = { manualUrl = it },
+                label = { Text("Registration Server URL") },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isUrlManaged,
+                supportingText = {
+                    if (isUrlManaged) Text("Value forced by MDM policy", color = MaterialTheme.colorScheme.primary)
+                }
+            )
+            
+            TextField(
+                value = manualAgency,
+                onValueChange = { manualAgency = it },
+                label = { Text("Agency Name") },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isAgencyManaged,
+                supportingText = {
+                    if (isAgencyManaged) Text("Value forced by MDM policy", color = MaterialTheme.colorScheme.primary)
+                }
+            )
+
+            if (!isUrlManaged || !isAgencyManaged) {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        if (!isUrlManaged) configManager.setManualServerUrl(manualUrl)
+                        if (!isAgencyManaged) configManager.setManualAgency(manualAgency)
+                        Toast.makeText(context, "Settings Saved", Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    Text("Save Config")
                 }
             }
 
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            Text("Policy Details:", style = MaterialTheme.typography.titleSmall)
             Text("Interval: ${configManager.getTrackingInterval()} mins")
             Text("Connection Secret: ${configManager.getConnectionSecret()}")
             
-            SpecialAccessButton(
-            label = "Disable Battery Optimization",
-            enabled = (context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).isIgnoringBatteryOptimizations(context.packageName),
-            onClick = {
-                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                    data = android.net.Uri.parse("package:${context.packageName}")
-                }
-                context.startActivity(intent)
+            val isPassManaged = configManager.isPasswordManaged()
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { showChangePasswordDialog = true },
+                enabled = !isPassManaged
+            ) {
+                Text(if (isPassManaged) "Password forced by MDM policy" else "Change Settings Password")
             }
-        )
 
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             
             Button(modifier = Modifier.fillMaxWidth(), onClick = {
                 val intent = Intent(context, LocationTrackingService::class.java)
@@ -772,6 +924,71 @@ fun SettingsPanel(configManager: ManagedConfigManager, onReRegister: () -> Unit,
             }
         }
     }
+
+    if (showChangePasswordDialog) {
+        SetPasswordDialog(
+            onDismiss = { showChangePasswordDialog = false },
+            onSuccess = { newPassword ->
+                configManager.setManualPassword(newPassword)
+                showChangePasswordDialog = false
+                Toast.makeText(context, "Password Updated", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+}
+
+@Composable
+fun SetPasswordDialog(onDismiss: () -> Unit, onSuccess: (String) -> Unit) {
+    var pass1 by remember { mutableStateOf("") }
+    var pass2 by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Set New Settings Password") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("This password will be required to unlock managed settings.")
+                TextField(
+                    value = pass1,
+                    onValueChange = { pass1 = it; error = null },
+                    visualTransformation = PasswordVisualTransformation(),
+                    label = { Text("New Password") },
+                    isError = error != null,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                TextField(
+                    value = pass2,
+                    onValueChange = { pass2 = it; error = null },
+                    visualTransformation = PasswordVisualTransformation(),
+                    label = { Text("Confirm Password") },
+                    isError = error != null,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (error != null) {
+                    Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                if (pass1.isEmpty()) {
+                    error = "Password cannot be empty"
+                } else if (pass1 != pass2) {
+                    error = "Passwords do not match"
+                } else {
+                    onSuccess(pass1)
+                }
+            }) {
+                Text("Save Password")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable

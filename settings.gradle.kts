@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "CFD Remote Assist"
+rootProject.name = "EUD Remote Assist"
 include(":app")
