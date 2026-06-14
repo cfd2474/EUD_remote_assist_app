@@ -38,6 +38,7 @@ class ScreenShareService : Service() {
     private var lastProcessedOfferSdp: String? = null
     private var captureWidth = 0
     private var captureHeight = 0
+    private var screenWakeLock: PowerManager.WakeLock? = null
     
     private val pollHandler = Handler(Looper.getMainLooper())
     private var pollRunnable: Runnable? = null
@@ -179,11 +180,13 @@ class ScreenShareService : Service() {
         windowManager.defaultDisplay.getRealMetrics(metrics)
 
         networkManager.setSessionActive(true)
+        RemoteSessionManager.isSessionActive = true
 
         videoCapturer = ScreenCapturerAndroid(data, object : MediaProjection.Callback() {
             override fun onStop() {
                 Log.d("ScreenShare", "MediaProjection stopped")
                 networkManager.setSessionActive(false)
+                RemoteSessionManager.isSessionActive = false
                 stopSelf()
             }
         })
@@ -238,6 +241,12 @@ class ScreenShareService : Service() {
         RemoteSessionManager.displayWidth = metrics.widthPixels
         RemoteSessionManager.displayHeight = metrics.heightPixels
         Log.d("ScreenShare", "Starting capture at ${captureWidth}x${captureHeight}")
+        
+        // Keep screen on during active capture
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        screenWakeLock = powerManager.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK, "RemoteAssist:ScreenShare")
+        screenWakeLock?.acquire()
+
         videoCapturer!!.startCapture(captureWidth, captureHeight, 30)
 
         localVideoTrack = peerConnectionFactory?.createVideoTrack("VIDEO_TRACK", videoSource)
@@ -472,6 +481,10 @@ class ScreenShareService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        if (screenWakeLock?.isHeld == true) {
+            screenWakeLock?.release()
+        }
+        screenWakeLock = null
         lastProcessedOfferSdp = null
         pollRunnable?.let { pollHandler.removeCallbacks(it) }
         try {

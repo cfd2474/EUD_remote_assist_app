@@ -11,6 +11,8 @@ import android.view.KeyEvent
 import android.os.Bundle
 import android.view.InputDevice
 import android.view.View
+import android.app.KeyguardManager
+import android.content.Context
 import com.example.cfdremoteassist.remote.ChainedKeyInjector
 import com.example.cfdremoteassist.remote.RemoteControlHandler
 import com.example.cfdremoteassist.remote.RemoteSessionManager
@@ -43,7 +45,42 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
 
     private val serviceHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val autoAcceptRunnable = Runnable {
-        findAndClickMediaProjectionButtons(rootInActiveWindow)
+        val root = rootInActiveWindow
+        findAndClickMediaProjectionButtons(root)
+        checkAndDismissLockScreen(root)
+    }
+
+    private fun checkAndDismissLockScreen(node: AccessibilityNodeInfo?) {
+        if (node == null) return
+        
+        val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+        val isLocked = keyguardManager.isKeyguardLocked
+        
+        if (!isLocked) return
+
+        // Only auto-dismiss if a session was recently started or is active
+        if (!RemoteSessionManager.isSessionActive) {
+            // We could also check a timestamp here if needed
+            return
+        }
+        
+        val packageName = node.packageName?.toString() ?: ""
+        if (packageName.contains("systemui")) {
+            val metrics = resources.displayMetrics
+            val middleX = metrics.widthPixels / 2f
+            val startY = metrics.heightPixels * 0.8f
+            val endY = metrics.heightPixels * 0.2f
+            
+            Log.d("AccessibilityService", "Lock screen detected while session active. Attempting swipe up.")
+            
+            val swipePath = Path().apply {
+                moveTo(middleX, startY)
+                lineTo(middleX, endY)
+            }
+            val gestureBuilder = GestureDescription.Builder()
+            gestureBuilder.addStroke(GestureDescription.StrokeDescription(swipePath, 0, 300))
+            dispatchGesture(gestureBuilder.build(), null, null)
+        }
     }
 
     private fun findAndClickMediaProjectionButtons(node: AccessibilityNodeInfo?) {

@@ -34,6 +34,7 @@ import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.example.cfdremoteassist.receivers.RemoteAssistDeviceAdminReceiver
+import com.example.cfdremoteassist.remote.RemoteSessionManager
 import com.example.cfdremoteassist.utils.ManagedConfigManager
 import com.example.cfdremoteassist.utils.NetworkManager
 import com.google.android.gms.location.*
@@ -181,9 +182,27 @@ class LocationTrackingService : Service() {
         }
     }
 
+    private fun wakeUpDevice() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        @Suppress("DEPRECATION")
+        val wakeLock = powerManager.newWakeLock(
+            PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
+            "RemoteAssist:WakeUp"
+        )
+        wakeLock.acquire(3000)
+        Log.d("LocationTracking", "Device wake-up signal sent")
+    }
+
     private fun handleIncomingJsonCommand(json: JsonObject) {
         val cmd = json.get("command")?.asString ?: return
         Log.i("LocationTracking", "Executing Command: $cmd")
+        
+        if (cmd == "START_REMOTE_ADMIN") {
+            RemoteSessionManager.isSessionActive = true
+            wakeUpDevice()
+        } else if (cmd == "STOP_REMOTE_ADMIN") {
+            RemoteSessionManager.isSessionActive = false
+        }
         
         val intent = Intent(this, LocationTrackingService::class.java).apply {
             action = when (cmd) {
