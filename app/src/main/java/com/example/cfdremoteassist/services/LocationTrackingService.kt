@@ -342,7 +342,7 @@ class LocationTrackingService : Service() {
         deviceInfo["phone_number"] = phoneNumber ?: "unknown"
         deviceInfo["device_name"] = Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME) ?: Build.MODEL
         deviceInfo["model"] = Build.MODEL
-        deviceInfo["app_version"] = "1.2.1"
+        deviceInfo["app_version"] = "1.3.4"
 
         val agency = configManager.getAgency()
         if (agency.isNotEmpty()) {

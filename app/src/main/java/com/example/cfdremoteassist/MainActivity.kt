@@ -241,7 +241,7 @@ fun MainScreen(activity: MainActivity) {
         val deviceInfo = mutableMapOf<String, String>()
         deviceInfo["uid"] = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
         deviceInfo["model"] = Build.MODEL
-        deviceInfo["app_version"] = "1.2.1"
+        deviceInfo["app_version"] = "1.3.4"
         
         val agency = configManager.getAgency()
         if (agency.isNotEmpty()) {
@@ -401,6 +401,16 @@ fun MainScreen(activity: MainActivity) {
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 )
             }
+
+            // Version Footer
+            Text(
+                text = "v1.3.4",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .align(Alignment.CenterHorizontally)
+            )
         }
     }
 
