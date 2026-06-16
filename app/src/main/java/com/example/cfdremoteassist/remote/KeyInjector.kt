@@ -40,10 +40,10 @@ class AccessibilityKeyInjector(
 
         // Sync Logic:
         // 1. If window or node changed, we MUST sync.
-        // 2. If it's been more than 1.5s since we typed, we sync to capture external changes.
+        // 2. If it's been more than 2.0s since we typed, we sync to capture external changes.
         // 3. Otherwise, we TRUST our shadow buffer to allow high-speed typing.
         val nodeChanged = lastFocusedNode != node
-        val timeoutExpired = now - lastActionTime > 1500
+        val timeoutExpired = now - lastActionTime > 2000
         
         if (lastNodeText == null || currentWindowId != lastNodeWindowId || nodeChanged || timeoutExpired) {
             if (nodeChanged || timeoutExpired) {

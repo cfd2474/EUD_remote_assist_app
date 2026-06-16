@@ -260,7 +260,9 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
 
     /** Called from your device WebSocket client when a message arrives. */
     fun onControlMessage(json: JSONObject) {
+        Log.d("AccessibilityService", "Received control message in service")
         if (::controlHandler.isInitialized) {
+            Log.d("AccessibilityService", "Dispatching to controlHandler")
             controlHandler.handle(json)
         } else {
             Log.w("AccessibilityService", "controlHandler not initialized")

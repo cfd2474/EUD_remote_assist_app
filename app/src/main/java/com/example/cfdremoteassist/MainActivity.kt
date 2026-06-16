@@ -25,8 +25,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.core.content.ContextCompat
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
@@ -49,6 +53,9 @@ import com.example.cfdremoteassist.utils.ManagedConfigManager
 import com.example.cfdremoteassist.utils.NetworkManager
 
 class MainActivity : ComponentActivity() {
+    private var _intentTrigger = mutableIntStateOf(0)
+    val intentTrigger: Int get() = _intentTrigger.intValue
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
@@ -91,8 +98,8 @@ class MainActivity : ComponentActivity() {
 
         // This will trigger the LaunchedEffect(refreshTrigger) if it's a share request
         if (intent.action == "TRIGGER_SCREEN_SHARE") {
-            // Force a recomposition to process the new intent action
-            recreate()
+            // Re-triggering refresh is enough, recreate() is too disruptive for screen capture
+            _intentTrigger.intValue++
         }
     }
 
@@ -165,6 +172,7 @@ fun MainScreen(activity: MainActivity) {
     var isRestricted by remember { mutableStateOf(isRestrictedSettingsActive(context)) }
     
     var refreshTrigger by remember { mutableIntStateOf(0) }
+    val intentTrigger = activity.intentTrigger
     val scrollState = rememberScrollState()
 
     val screenCaptureLauncher = rememberLauncherForActivityResult(
@@ -196,7 +204,7 @@ fun MainScreen(activity: MainActivity) {
     }
 
     // Auto-trigger screen share if requested by service
-    LaunchedEffect(refreshTrigger) {
+    LaunchedEffect(refreshTrigger, intentTrigger) {
         val intent = (context as? Activity)?.intent
         if (intent?.action == "TRIGGER_SCREEN_SHARE") {
             intent.action = null 
@@ -261,7 +269,9 @@ fun MainScreen(activity: MainActivity) {
             isRegistering = false
             if (success) {
                 isRegistered = true
-                val intent = Intent(context, LocationTrackingService::class.java)
+                val intent = Intent(context, LocationTrackingService::class.java).apply {
+                    action = LocationTrackingService.ACTION_REFRESH_CONNECTION
+                }
                 context.startForegroundService(intent)
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     Toast.makeText(context, "Registration Successful", Toast.LENGTH_SHORT).show()
@@ -394,12 +404,22 @@ fun MainScreen(activity: MainActivity) {
                     )
                 }
             } else {
-                Text(
-                    "Device Registered", 
-                    color = MaterialTheme.colorScheme.primary, 
-                    style = MaterialTheme.typography.titleMedium,
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.align(Alignment.CenterHorizontally)
-                )
+                ) {
+                    Text(
+                        "Device Registered",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        configManager.getTrackingServerUrl(),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
             }
 
             // Version Footer
@@ -532,7 +552,9 @@ fun DiagnosticsSection(networkManager: NetworkManager) {
         Button(
             modifier = Modifier.fillMaxWidth(),
             onClick = {
-                val intent = Intent(context, LocationTrackingService::class.java)
+                val intent = Intent(context, LocationTrackingService::class.java).apply {
+                    action = LocationTrackingService.ACTION_REFRESH_CONNECTION
+                }
                 context.startForegroundService(intent)
                 Toast.makeText(context, "Connection Refreshed", Toast.LENGTH_SHORT).show()
             }
@@ -658,8 +680,8 @@ fun PermissionSection(
             text = {
                 Text(
                     "1. Click 'Installed / Downloaded Apps'\n" +
-                    "2. Click 'Remote Assist Remote Control'\n" +
-                    "3. Toggle the switch to ON\n\n" +
+                    "2. Click 'Remote Assist Remote Control' (even if greyed out, keep clicking until a restricted warning appears)\n" +
+                    "3. Toggle the switch to ON (skip if restricted warning appears and proceed to ALLOW RESTRICTED SETTINGS button below)\n\n" +
                     "If the next screen shows 'Settings Restricted' or access is denied, please return and use the 'ALLOW RESTRICTED SETTINGS' button below first, then proceed to Enable Remote Control."
                 )
             },
@@ -975,46 +997,75 @@ fun SettingsPanel(configManager: ManagedConfigManager, onReRegister: () -> Unit,
     var manualUrl by remember { mutableStateOf(configManager.getTrackingServerUrl()) }
     var manualAgency by remember { mutableStateOf(configManager.getAgency()) }
     var showChangePasswordDialog by remember { mutableStateOf(false) }
+    var showUrlDialog by remember { mutableStateOf(false) }
+    var showAgencyDialog by remember { mutableStateOf(false) }
 
     // Sync state if MDM policy changes while panel is open
     val isUrlManaged = configManager.isServerUrlManaged()
     val isAgencyManaged = configManager.isAgencyManaged()
-    
+
     LaunchedEffect(isUrlManaged, isAgencyManaged) {
         if (isUrlManaged) manualUrl = configManager.getTrackingServerUrl()
         if (isAgencyManaged) manualAgency = configManager.getAgency()
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             Text("Managed Settings", style = MaterialTheme.typography.titleLarge)
             
             val isUrlManaged = configManager.isServerUrlManaged()
             val isAgencyManaged = configManager.isAgencyManaged()
 
             Text("Server Configuration:", style = MaterialTheme.typography.titleSmall)
-            
-            TextField(
-                value = manualUrl,
-                onValueChange = { manualUrl = it },
-                label = { Text("Registration Server URL") },
+
+            OutlinedCard(
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !isUrlManaged,
-                supportingText = {
-                    if (isUrlManaged) Text("Value forced by MDM policy", color = MaterialTheme.colorScheme.primary)
+                onClick = { if (!isUrlManaged) showUrlDialog = true },
+                enabled = !isUrlManaged
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text("Registration Server URL", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        text = if (manualUrl.isNotEmpty()) manualUrl else "Not set",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isUrlManaged) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                    )
                 }
-            )
-            
-            TextField(
-                value = manualAgency,
-                onValueChange = { manualAgency = it },
-                label = { Text("Agency Name") },
+            }
+            if (isUrlManaged) {
+                Text("Value forced by MDM policy", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+            }
+
+            OutlinedCard(
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !isAgencyManaged,
-                supportingText = {
-                    if (isAgencyManaged) Text("Value forced by MDM policy", color = MaterialTheme.colorScheme.primary)
+                onClick = { if (!isAgencyManaged) showAgencyDialog = true },
+                enabled = !isAgencyManaged
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text("Agency Name", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        text = if (manualAgency.isNotEmpty()) manualAgency else "Not set",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isAgencyManaged) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                    )
                 }
-            )
+            }
+            if (isAgencyManaged) {
+                Text("Value forced by MDM policy", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+            }
 
             if (!isUrlManaged || !isAgencyManaged) {
                 Button(
@@ -1022,11 +1073,12 @@ fun SettingsPanel(configManager: ManagedConfigManager, onReRegister: () -> Unit,
                     onClick = {
                         if (!isUrlManaged) configManager.setManualServerUrl(manualUrl)
                         if (!isAgencyManaged) configManager.setManualAgency(manualAgency)
-                        Toast.makeText(context, "Settings Saved", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Settings Saved - Registering...", Toast.LENGTH_SHORT).show()
+                        onReRegister()
                         onLock()
                     }
                 ) {
-                    Text("Save Config")
+                    Text("Save and Register")
                 }
             }
 
@@ -1095,6 +1147,28 @@ fun SettingsPanel(configManager: ManagedConfigManager, onReRegister: () -> Unit,
             }
         )
     }
+
+    if (showUrlDialog) {
+        ServerUrlDialog(
+            initialValue = manualUrl,
+            onDismiss = { showUrlDialog = false },
+            onSave = { newUrl ->
+                manualUrl = newUrl
+                showUrlDialog = false
+            }
+        )
+    }
+
+    if (showAgencyDialog) {
+        AgencyDialog(
+            initialValue = manualAgency,
+            onDismiss = { showAgencyDialog = false },
+            onSave = { newAgency ->
+                manualAgency = newAgency
+                showAgencyDialog = false
+            }
+        )
+    }
 }
 
 @Composable
@@ -1109,20 +1183,22 @@ fun SetPasswordDialog(onDismiss: () -> Unit, onSuccess: (String) -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("This password will be required to unlock managed settings.")
-                TextField(
+                OutlinedTextField(
                     value = pass1,
                     onValueChange = { pass1 = it; error = null },
                     visualTransformation = PasswordVisualTransformation(),
                     label = { Text("New Password") },
                     isError = error != null,
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                TextField(
+                OutlinedTextField(
                     value = pass2,
                     onValueChange = { pass2 = it; error = null },
                     visualTransformation = PasswordVisualTransformation(),
                     label = { Text("Confirm Password") },
                     isError = error != null,
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 if (error != null) {
@@ -1161,12 +1237,14 @@ fun PasswordEntryDialog(correctPassword: String, onDismiss: () -> Unit, onSucces
         title = { Text("Enter Settings Password") },
         text = {
             Column {
-                TextField(
+                OutlinedTextField(
                     value = password,
                     onValueChange = { password = it; error = false },
                     visualTransformation = PasswordVisualTransformation(),
                     label = { Text("Password") },
-                    isError = error
+                    isError = error,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
                 )
                 if (error) {
                     Text("Incorrect password", color = MaterialTheme.colorScheme.error)
@@ -1182,6 +1260,84 @@ fun PasswordEntryDialog(correctPassword: String, onDismiss: () -> Unit, onSucces
                 }
             }) {
                 Text("Unlock")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun ServerUrlDialog(initialValue: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var url by remember { mutableStateOf(initialValue) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Registration Server URL") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Server URL", style = MaterialTheme.typography.labelLarge)
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    placeholder = { Text("https://server.example.com") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() }),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                        focusedContainerColor = MaterialTheme.colorScheme.surface
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onSave(url) }) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun AgencyDialog(initialValue: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var agency by remember { mutableStateOf(initialValue) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Agency Name") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Agency", style = MaterialTheme.typography.labelLarge)
+                OutlinedTextField(
+                    value = agency,
+                    onValueChange = { agency = it },
+                    placeholder = { Text("e.g., NYPD, LAPD") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() }),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                        focusedContainerColor = MaterialTheme.colorScheme.surface
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onSave(agency) }) {
+                Text("Save")
             }
         },
         dismissButton = {

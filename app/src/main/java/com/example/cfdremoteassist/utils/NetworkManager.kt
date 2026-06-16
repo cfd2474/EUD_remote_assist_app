@@ -208,13 +208,15 @@ class NetworkManager private constructor(private val context: Context, private v
         
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.d("NetworkManager", "WebSocket Opened. Sending auth...")
+                Log.d("NetworkManager", "WebSocket Opened to: ${request.url}. Sending auth for UID: $uid")
                 val auth = JsonObject().apply {
                     addProperty("type", "auth")
                     addProperty("uid", uid)
                     addProperty("connection_secret", secret)
                 }
-                webSocket.send(gson.toJson(auth))
+                val authJson = gson.toJson(auth)
+                Log.d("NetworkManager", "Sending Auth Payload: $authJson")
+                webSocket.send(authJson)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {

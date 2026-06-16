@@ -74,6 +74,7 @@ class LocationTrackingService : Service() {
         const val ACTION_STOP_REMOTE_ADMIN = "com.example.cfdremoteassist.STOP_REMOTE_ADMIN"
         const val ACTION_LOCK_DEVICE = "com.example.cfdremoteassist.LOCK_DEVICE"
         const val ACTION_RESYNC_DEVICE_INFO = "com.example.cfdremoteassist.RESYNC_DEVICE_INFO"
+        const val ACTION_REFRESH_CONNECTION = "com.example.cfdremoteassist.REFRESH_CONNECTION"
     }
 
     private val restrictionsReceiver = object : BroadcastReceiver() {
@@ -171,13 +172,19 @@ class LocationTrackingService : Service() {
                     }
                 }
                 "webrtc" -> {
-                    val intent = Intent(this, ScreenShareService::class.java).apply {
-                        action = ScreenShareService.ACTION_PROCESS_SIGNAL
-                        putExtra(ScreenShareService.EXTRA_SIGNAL, json.toString())
+                    val incomingSecret = json.get("connection_secret")?.asString
+                    if (incomingSecret == secret) {
+                        val intent = Intent(this, ScreenShareService::class.java).apply {
+                            action = ScreenShareService.ACTION_PROCESS_SIGNAL
+                            putExtra(ScreenShareService.EXTRA_SIGNAL, json.toString())
+                        }
+                        startService(intent)
+                    } else {
+                        Log.w("LocationTracking", "WebRTC signal rejected: Secret mismatch")
                     }
-                    startService(intent)
                 }
                 "control" -> {
+                    Log.d("LocationTracking", "Received control message, routing to handler")
                     handleRemoteControl(json)
                 }
                 "auth_ok" -> Log.i("LocationTracking", "WebSocket Authenticated")
@@ -265,15 +272,31 @@ class LocationTrackingService : Service() {
     }
 
     private fun handleRemoteControl(json: JsonObject) {
+        // Log the received action
+        val action = json.get("action")?.asString
+        Log.d("LocationTracking", "Processing control message. Action: $action")
+
+        // Authenticate the control message
+        val secret = configManager.getConnectionSecret()
+        val incomingSecret = json.get("connection_secret")?.asString
+        
+        // Note: The portal doc says server adds connection_secret to admin->device messages.
+        // However, we rely on the authenticated WebSocket session for control messages.
+        // We log mismatches but don't reject yet to avoid blocking valid inputs if the server is inconsistent.
+        if (!incomingSecret.isNullOrEmpty() && !secret.isNullOrEmpty() && incomingSecret != secret) {
+            Log.w("LocationTracking", "Control message secret mismatch (Expected: $secret, Got: $incomingSecret). Proceeding anyway via WS auth.")
+        }
+
         val accessibilityService = RemoteAssistAccessibilityService.instance
         if (accessibilityService == null) {
-            Log.w("LocationTracking", "Control rejected: Accessibility Service not running")
+            Log.w("LocationTracking", "Control rejected: Accessibility Service not running. Is it enabled in Settings?")
             return
         }
 
         try {
             val jsonString = json.toString()
             val jsonObject = JSONObject(jsonString)
+            Log.d("LocationTracking", "Routing control to accessibility service: $jsonString")
             accessibilityService.onControlMessage(jsonObject)
         } catch (e: Exception) {
             Log.e("LocationTracking", "Error executing control input", e)
@@ -403,6 +426,29 @@ class LocationTrackingService : Service() {
             ACTION_RESYNC_DEVICE_INFO -> {
                 val isManual = intent.getBooleanExtra("is_manual", false)
                 sendDeviceRegistration(isManualResync = isManual)
+                sendTelemetryUpdate()
+            }
+            ACTION_REFRESH_CONNECTION -> {
+                Log.i("LocationTracking", "Refreshing all server connections")
+                loadManagedConfigurations()
+
+                // 1. Force stop all dependent services to reset their state
+                val stopIntent = Intent(this, ScreenShareService::class.java).apply {
+                    action = ScreenShareService.ACTION_STOP
+                }
+                startService(stopIntent)
+                stopRemoteAdminIndicators()
+                RemoteSessionManager.isSessionActive = false
+
+                // 2. Cycle the WebSocket with a small delay to ensure cleanup and prefs sync
+                networkManager.disconnectWebSocket()
+                handler.postDelayed({
+                    connectRealTimeGateway()
+                    // 3. Proactively push device info to the NEW server
+                    sendDeviceRegistration(isManualResync = true)
+                    // 4. Push telemetry update
+                    sendTelemetryUpdate()
+                }, 1500)
             }
             else -> startLocationUpdates()
         }
@@ -520,7 +566,7 @@ class LocationTrackingService : Service() {
         val batteryPct = if (batteryScale > 0) (batteryLevel * 100 / batteryScale) else -1
 
         val chargingStatus = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
-        val isCharging = chargingStatus == BatteryManager.BATTERY_STATUS_CHARGING || 
+        val isCharging = chargingStatus == BatteryManager.BATTERY_STATUS_CHARGING ||
                          chargingStatus == BatteryManager.BATTERY_STATUS_FULL
 
         val payload = mutableMapOf<String, Any>()
@@ -534,6 +580,47 @@ class LocationTrackingService : Service() {
 
         Log.d("LocationTracking", "Sending telemetry: $payload")
         networkManager.sendTelemetry(payload)
+    }
+
+    @SuppressLint("MissingPermission")
+    fun sendTelemetryUpdate() {
+        val batteryStatus: Intent? = IntentFilter(Intent.ACTION_BATTERY_CHANGED).let { ifilter ->
+            registerReceiver(null, ifilter)
+        }
+        val batteryLevel: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val batteryScale: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val batteryPct = if (batteryScale > 0) (batteryLevel * 100 / batteryScale) else -1
+
+        val chargingStatus = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+        val isCharging = chargingStatus == BatteryManager.BATTERY_STATUS_CHARGING ||
+                         chargingStatus == BatteryManager.BATTERY_STATUS_FULL
+
+        val payload = mutableMapOf<String, Any>()
+        payload["uid"] = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+        payload["battery"] = batteryPct
+        payload["is_charging"] = isCharging
+        payload["timestamp"] = System.currentTimeMillis()
+
+        // Try to get last known location
+        try {
+            fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+                if (location != null) {
+                    payload["lat"] = location.latitude
+                    payload["lon"] = location.longitude
+                    payload["accuracy_m"] = location.accuracy
+                }
+                Log.d("LocationTracking", "Sending telemetry update: $payload")
+                networkManager.sendTelemetry(payload)
+            }.addOnFailureListener {
+                // Send telemetry without location data
+                Log.d("LocationTracking", "Sending telemetry update without location: $payload")
+                networkManager.sendTelemetry(payload)
+            }
+        } catch (e: SecurityException) {
+            // Send telemetry without location data
+            Log.d("LocationTracking", "Sending telemetry update without location (permission denied): $payload")
+            networkManager.sendTelemetry(payload)
+        }
     }
 
     private fun startAudiblePing() {

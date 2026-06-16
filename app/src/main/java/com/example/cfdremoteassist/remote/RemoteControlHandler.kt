@@ -22,9 +22,16 @@ class RemoteControlHandler(
     private val tag = "RemoteControlHandler"
 
     fun handle(message: JSONObject) {
-        if (message.optString("type") != "control") return
+        Log.d(tag, "RemoteControlHandler handling message: $message")
+        if (message.optString("type") != "control") {
+            Log.w(tag, "Message type is not control: ${message.optString("type")}")
+            return
+        }
 
-        when (message.optString("action")) {
+        val action = message.optString("action")
+        Log.d(tag, "Executing action: $action")
+        
+        when (action) {
             "CLICK" -> injectClick(
                 message.optDouble("x_percent", 0.0),
                 message.optDouble("y_percent", 0.0),
@@ -47,7 +54,7 @@ class RemoteControlHandler(
                 message.optString("key"),
                 message.optString("input_method"),
             )
-            else -> Log.w(tag, "Unknown control action: ${message.optString("action")}")
+            else -> Log.w(tag, "Unknown control action: $action")
         }
     }
 
@@ -174,7 +181,12 @@ class RemoteControlHandler(
         )
 
         val okDown = keyInjector.inject(down)
-        val okUp = keyInjector.inject(up)
-        Log.d(tag, "KEY $key → keyCode=${parsed.keyCode} meta=${parsed.metaState} down=$okDown up=$okUp")
+        
+        // Add a small delay between DOWN and UP to allow system processing
+        // This helps prevent "sporadic" keyboard entries or skipped chars
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            val okUp = keyInjector.inject(up)
+            Log.d(tag, "KEY $key → keyCode=${parsed.keyCode} meta=${parsed.metaState} down=$okDown up=$okUp")
+        }, 50L)
     }
 }

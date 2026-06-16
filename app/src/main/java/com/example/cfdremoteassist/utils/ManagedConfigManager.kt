@@ -8,6 +8,33 @@ class ManagedConfigManager(context: Context) {
     private val restrictionsManager = context.getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
     private val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
 
+    private fun addDefaultPortIfMissing(url: String): String {
+        if (url.isEmpty()) return url
+
+        // Check if URL already has a port specified
+        // Pattern: scheme://host:port or scheme://host/path
+        val urlWithoutScheme = url.replace("https://", "").replace("http://", "")
+        val hostPart = urlWithoutScheme.split("/")[0]
+
+        // If host already has a port (contains :), return as-is
+        if (hostPart.contains(":")) {
+            return url
+        }
+
+        // Add default port 8448
+        val scheme = when {
+            url.startsWith("https://") -> "https://"
+            url.startsWith("http://") -> "http://"
+            else -> ""
+        }
+
+        return if (scheme.isNotEmpty()) {
+            scheme + hostPart + ":8448" + urlWithoutScheme.removePrefix(hostPart)
+        } else {
+            url
+        }
+    }
+
     fun getSettingsPassword(): String? {
         val appRestrictions: Bundle = restrictionsManager.applicationRestrictions
         val managedPassword = appRestrictions.getString("settings_password")
@@ -29,12 +56,20 @@ class ManagedConfigManager(context: Context) {
     }
 
     fun getTrackingServerUrl(): String {
+        // Priority 1: MDM Managed URL (Should always override manual settings in managed environments)
         val appRestrictions: Bundle = restrictionsManager.applicationRestrictions
         val managedUrl = appRestrictions.getString("tracking_server_url")
         if (!managedUrl.isNullOrEmpty()) {
-            return managedUrl.trimEnd('/')
+            return addDefaultPortIfMissing(managedUrl.trimEnd('/'))
         }
-        return prefs.getString("manual_server_url", "") ?: ""
+
+        // Priority 2: Manual URL (Set during manual setup OR from the server's registration response)
+        val manualUrl = prefs.getString("manual_server_url", "") ?: ""
+        if (manualUrl.isNotEmpty()) {
+            return addDefaultPortIfMissing(manualUrl.trimEnd('/'))
+        }
+
+        return ""
     }
 
     fun isServerUrlManaged(): Boolean {
@@ -47,7 +82,8 @@ class ManagedConfigManager(context: Context) {
         if (formattedUrl.isNotEmpty() && !formattedUrl.startsWith("http://") && !formattedUrl.startsWith("https://")) {
             formattedUrl = "https://$formattedUrl"
         }
-        prefs.edit().putString("manual_server_url", formattedUrl.trimEnd('/')).apply()
+        formattedUrl = addDefaultPortIfMissing(formattedUrl.trimEnd('/'))
+        prefs.edit().putString("manual_server_url", formattedUrl).commit()
     }
 
     fun getConnectionSecret(): String {
@@ -56,11 +92,11 @@ class ManagedConfigManager(context: Context) {
     }
 
     fun setConnectionSecret(secret: String) {
-        prefs.edit().putString("cached_connection_secret", secret).apply()
+        prefs.edit().putString("cached_connection_secret", secret).commit()
     }
 
     fun clearConnectionSecret() {
-        prefs.edit().remove("cached_connection_secret").apply()
+        prefs.edit().remove("cached_connection_secret").commit()
         setRegistered(false)
     }
 
@@ -95,13 +131,13 @@ class ManagedConfigManager(context: Context) {
     fun isRegistered(): Boolean = prefs.getBoolean("is_registered", false)
 
     fun setRegistered(registered: Boolean) {
-        prefs.edit().putBoolean("is_registered", registered).apply()
+        prefs.edit().putBoolean("is_registered", registered).commit()
     }
 
     fun getLastDeviceUpdate(): Long = prefs.getLong("last_device_update", 0L)
 
     fun setLastDeviceUpdate(timestamp: Long) {
-        prefs.edit().putLong("last_device_update", timestamp).apply()
+        prefs.edit().putLong("last_device_update", timestamp).commit()
     }
 
     fun isBootStartEnabled(): Boolean = prefs.getBoolean("boot_start_enabled", false)

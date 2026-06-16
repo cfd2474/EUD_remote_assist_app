@@ -17,8 +17,8 @@ android {
         applicationId = "com.example.cfdremoteassist"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.3.4"
+        versionCode = 8
+        versionName = "1.3.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
