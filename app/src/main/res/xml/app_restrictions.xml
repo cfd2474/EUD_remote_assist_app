@@ -1,39 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <restrictions xmlns:android="http://schemas.android.com/apk/res/android">
-
-    <restriction
-        android:key="settings_password"
-        android:title="@string/settings_password_title"
-        android:restrictionType="string"
-        android:description="@string/settings_password_desc"
-        android:defaultValue="" />
-
     <restriction
         android:key="tracking_server_url"
-        android:title="@string/tracking_server_url_title"
+        android:title="Tracking Server URL"
         android:restrictionType="string"
-        android:description="@string/tracking_server_url_desc"
-        android:defaultValue="" />
-
+        android:defaultValue="https://remote.tak-solutions.com:8448" />
+    <restriction
+        android:key="connection_secret"
+        android:title="Connection Secret"
+        android:restrictionType="string" />
     <restriction
         android:key="tracking_interval"
-        android:title="@string/tracking_interval_title"
+        android:title="Tracking Interval (minutes)"
         android:restrictionType="integer"
-        android:description="@string/tracking_interval_desc"
         android:defaultValue="15" />
-
+    <restriction
+        android:key="settings_password"
+        android:title="Settings Password"
+        android:restrictionType="string" />
     <restriction
         android:key="agency"
-        android:title="@string/agency_title"
-        android:restrictionType="string"
-        android:description="@string/agency_desc"
-        android:defaultValue="" />
-
-    <restriction
-        android:key="auto_grant_permissions"
-        android:title="@string/auto_grant_permissions_title"
-        android:restrictionType="bool"
-        android:description="@string/auto_grant_permissions_desc"
-        android:defaultValue="true" />
-
+        android:title="Agency Name"
+        android:restrictionType="string" />
 </restrictions>

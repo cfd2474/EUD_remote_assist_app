@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Permissions -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -48,45 +49,70 @@
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/ic_launcher_custom"
         android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:roundIcon="@mipmap/ic_launcher_custom"
         android:supportsRtl="true"
-        android:theme="@style/Theme.EUDRemoteAssist">
+        android:theme="@style/Theme.EudTest1">
 
+        <!-- MDM Restrictions Meta-data -->
         <meta-data
             android:name="android.content.APP_RESTRICTIONS"
             android:resource="@xml/app_restrictions" />
 
+        <!-- Main Activity -->
         <activity
-            android:name=".SplashActivity"
+            android:name=".MainActivity"
             android:exported="true"
-            android:noHistory="true"
+            android:launchMode="singleTop"
             android:excludeFromRecents="true"
-            android:theme="@style/Theme.EUDRemoteAssist.Splash">
+            android:taskAffinity=""
+            android:theme="@style/Theme.EudTest1">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="com.cfd2474.eudremoteassist.ACTION_REQUEST_PROJECTION" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
+        <!-- Ping Activity -->
         <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:label="@string/app_name"
-            android:theme="@style/Theme.EUDRemoteAssist"
-            android:excludeFromRecents="true"
-            android:windowSoftInputMode="adjustResize">
-        </activity>
-
-        <service
-            android:name=".services.LocationTrackingService"
-            android:enabled="true"
+            android:name=".PingActivity"
             android:exported="false"
-            android:foregroundServiceType="location" />
+            android:theme="@style/Theme.EudTest1"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:launchMode="singleTop"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+
+        <!-- Services -->
+        <service
+            android:name=".service.DeviceGatewayService"
+            android:foregroundServiceType="location|specialUse"
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Device administration and gateway connection for remote assistance" />
+        </service>
 
         <service
-            android:name=".services.RemoteAssistAccessibilityService"
+            android:name=".service.ScreenShareService"
+            android:foregroundServiceType="mediaProjection"
+            android:configChanges="orientation|screenSize|screenLayout"
+            android:exported="false" />
+
+        <service
+            android:name=".service.OverlayService"
+            android:exported="false" />
+
+        <!-- Accessibility Service -->
+        <service
+            android:name=".service.RemoteAssistAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:label="@string/accessibility_service_label"
             android:exported="true">
@@ -98,49 +124,28 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <service
-            android:name=".services.RemoteAssistNotificationService"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
-
-        <service
-            android:name=".services.OverlayService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Remote assistance visual indicators for managed devices." />
-        </service>
-
-        <service
-            android:name=".services.ScreenShareService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
-
+        <!-- Receivers -->
         <receiver
-            android:name=".receivers.RemoteAssistDeviceAdminReceiver"
-            android:permission="android.permission.BIND_DEVICE_ADMIN"
-            android:exported="true">
-            <meta-data
-                android:name="android.app.device_admin"
-                android:resource="@xml/device_admin_receiver" />
-            <intent-filter>
-                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
-            </intent-filter>
-        </receiver>
-
-        <receiver
-            android:name=".receivers.BootReceiver"
+            android:name=".receiver.BootReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.USER_PRESENT" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".receiver.DeviceAdminReceiver"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:label="@string/app_name"
+            android:exported="true">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
             </intent-filter>
         </receiver>
 

@@ -1,16 +1,5 @@
 <resources>
     <string name="app_name">EUD Remote Assist</string>
-    <string name="accessibility_service_label">Remote Assist Remote Control</string>
-    <string name="accessibility_service_description">Enables remote control for technical assistance.</string>
-
-    <string name="settings_password_title">Settings Password</string>
-    <string name="settings_password_desc">Password to access the settings page</string>
-    <string name="tracking_server_url_title">Tracking Server URL</string>
-    <string name="tracking_server_url_desc">URL of the server for device registration and assistance (e.g., https://remote.tak-solutions.com:8448)</string>
-    <string name="tracking_interval_title">Tracking Interval (minutes)</string>
-    <string name="tracking_interval_desc">Interval in minutes for sending location updates</string>
-    <string name="agency_title">Agency</string>
-    <string name="agency_desc">The agency or organization this device belongs to</string>
-    <string name="auto_grant_permissions_title">Auto-Grant System Permissions</string>
-    <string name="auto_grant_permissions_desc">If enabled, the app will automatically grant all required system permissions upon launch (Requires Device Owner status).</string>
+    <string name="accessibility_service_desc">EUD Remote Assist Accessibility Service is used to inject touch, swipe, and key gestures from the remote admin portal.</string>
+    <string name="accessibility_service_label">EUD Remote Assist Control</string>
 </resources>

@@ -22,5 +22,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "EUD Remote Assist"
+rootProject.name = "eud test1"
 include(":app")
+ 
