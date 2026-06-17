@@ -22,6 +22,7 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
 
     private val serviceHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val autoAcceptRunnable = Runnable {
+        if (!RemoteSessionState.isSessionActive) return@Runnable
         val root = rootInActiveWindow
         findAndClickMediaProjectionButtons(root)
         checkAndDismissLockScreen(root)
@@ -36,7 +37,7 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null) return
+        if (event == null || !RemoteSessionState.isSessionActive) return
 
         // Auto-accept Screen Share / Media Projection dialog
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
