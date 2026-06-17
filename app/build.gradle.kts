@@ -6,7 +6,7 @@ plugins {
 val gitCommitHash = providers.exec {
     commandLine("git", "rev-parse", "--short", "HEAD")
     isIgnoreExitValue = true
-}.standardOutput.asText.map { it.trim() }.orElse("68c7071")
+}.standardOutput.asText.map { it.trim() }.orElse("afcc713")
 
 android {
     namespace = "com.cfd2474.eudremoteassist"
