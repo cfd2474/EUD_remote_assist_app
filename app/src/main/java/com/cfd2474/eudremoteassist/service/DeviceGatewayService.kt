@@ -537,6 +537,12 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
     }
 
     private fun forwardSignaling(messageText: String) {
+        val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        if (keyguardManager.isKeyguardLocked && ScreenShareService.instance == null) {
+            Log.w(TAG, "Device is locked and ScreenShareService is not running. Ignoring signaling message to avoid premature WebRTC connection.")
+            return
+        }
+
         val activeService = ScreenShareService.instance
         if (activeService != null) {
             Log.d(TAG, "Forwarding signaling message directly in-memory")
