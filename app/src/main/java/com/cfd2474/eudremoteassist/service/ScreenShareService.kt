@@ -386,7 +386,7 @@ class ScreenShareService : Service() {
     private fun sendDeviceEvent(eventName: String, payload: JsonObject = JsonObject()) {
         val eventJson = JsonObject().apply {
             addProperty("type", "device_event")
-            addProperty("uid", networkManager.getAndroidId())
+            addProperty("uid", networkManager.getDeviceUid())
             addProperty("event", eventName)
             add("payload", payload)
         }

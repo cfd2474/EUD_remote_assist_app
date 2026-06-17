@@ -77,8 +77,72 @@ class NetworkManager private constructor(
         return isConnected
     }
 
-    fun getAndroidId(): String {
-        return Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: "unknown_uid"
+    fun getDeviceUid(): String {
+        // 1. Try Build.getSerial() (requires READ_PHONE_STATE, works on Android 9 and below or Android 10+ if Device Owner)
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                @Suppress("MissingPermission")
+                val serial = android.os.Build.getSerial()
+                if (!serial.isNullOrBlank() && serial != android.os.Build.UNKNOWN) {
+                    return "serial_$serial"
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                val serial = android.os.Build.SERIAL
+                if (!serial.isNullOrBlank() && serial != android.os.Build.UNKNOWN) {
+                    return "serial_$serial"
+                }
+            }
+        } catch (e: SecurityException) {
+            Log.d(TAG, "Build.getSerial() SecurityException: ${e.message}")
+        } catch (e: Exception) {
+            Log.d(TAG, "Build.getSerial() error: ${e.message}")
+        }
+
+        // 2. Try TelephonyManager IMEI/MEID (requires READ_PHONE_STATE, works if Device Owner or on older Android versions)
+        try {
+            val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as? android.telephony.TelephonyManager
+            if (telephonyManager != null) {
+                @Suppress("MissingPermission")
+                val imei = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    telephonyManager.imei ?: telephonyManager.meid
+                } else {
+                    @Suppress("DEPRECATION")
+                    telephonyManager.deviceId
+                }
+                if (!imei.isNullOrBlank() && imei != "unknown") {
+                    return "imei_$imei"
+                }
+            }
+        } catch (e: SecurityException) {
+            Log.d(TAG, "TelephonyManager getImei() SecurityException: ${e.message}")
+        } catch (e: Exception) {
+            Log.d(TAG, "TelephonyManager error: ${e.message}")
+        }
+
+        // 3. Try Widevine MediaDrm ID (reliable hardware-backed identifier across reinstallation/signing keys, no permission needed)
+        try {
+            val widevineUuid = java.util.UUID.fromString("ed90f895-d5cd-45d8-a341-5d40a2d14747")
+            val mediaDrm = android.media.MediaDrm(widevineUuid)
+            val widevineId = mediaDrm.getPropertyByteArray(android.media.MediaDrm.PROPERTY_DEVICE_UNIQUE_ID)
+            mediaDrm.close()
+            if (widevineId != null && widevineId.isNotEmpty()) {
+                val hexString = widevineId.joinToString("") { String.format("%02x", it) }
+                if (hexString.isNotBlank()) {
+                    return "wv_$hexString"
+                }
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Widevine DRM unique ID error: ${e.message}")
+        }
+
+        // 4. Fallback to Settings.Secure.ANDROID_ID
+        val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+        if (!androidId.isNullOrBlank()) {
+            return androidId
+        }
+
+        return "unknown_uid"
     }
 
     @Suppress("MissingPermission")
@@ -123,7 +187,7 @@ class NetworkManager private constructor(
         val url = "$serverUrl/api/v1/register"
 
         val bodyJson = JsonObject().apply {
-            addProperty("uid", getAndroidId())
+            addProperty("uid", getDeviceUid())
             addProperty("device_name", deviceName)
             addProperty("model", model)
             addProperty("app_version", appVersion)
@@ -187,7 +251,7 @@ class NetworkManager private constructor(
         val url = "$serverUrl/api/v1/telemetry"
 
         val bodyJson = JsonObject().apply {
-            addProperty("uid", getAndroidId())
+            addProperty("uid", getDeviceUid())
             addProperty("lat", lat)
             addProperty("lon", lon)
             addProperty("accuracy_m", accuracy)
@@ -236,7 +300,7 @@ class NetworkManager private constructor(
         val url = "$serverUrl/api/v1/event"
 
         val bodyJson = JsonObject().apply {
-            addProperty("uid", getAndroidId())
+            addProperty("uid", getDeviceUid())
             addProperty("event", event)
             add("payload", payload)
         }
@@ -311,7 +375,7 @@ class NetworkManager private constructor(
             return
         }
 
-        val url = "$serverUrl/api/v1/signaling?uid=${getAndroidId()}"
+        val url = "$serverUrl/api/v1/signaling?uid=${getDeviceUid()}"
         val request = Request.Builder()
             .url(url)
             .header("X-Connection-Secret", secret)
@@ -347,7 +411,7 @@ class NetworkManager private constructor(
         val url = "$serverUrl/api/v1/signaling"
 
         // Ensure uid is included in the payload
-        messageJson.addProperty("uid", getAndroidId())
+        messageJson.addProperty("uid", getDeviceUid())
 
         val request = Request.Builder()
             .url(url)
@@ -401,7 +465,7 @@ class NetworkManager private constructor(
                 // First message must be auth within 10s
                 val authMsg = JsonObject().apply {
                     addProperty("type", "auth")
-                    addProperty("uid", getAndroidId())
+                    addProperty("uid", getDeviceUid())
                     addProperty("connection_secret", secret)
                 }
                 webSocket.send(gson.toJson(authMsg))

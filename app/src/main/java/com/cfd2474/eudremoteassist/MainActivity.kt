@@ -627,7 +627,7 @@ class MainActivity : ComponentActivity() {
 
                                 HorizontalDivider(color = Color(0xFF334155))
 
-                                InfoRow(label = "Device UID:", value = networkManager.getAndroidId())
+                                InfoRow(label = "Device UID:", value = networkManager.getDeviceUid())
                                 InfoRow(
                                     label = "Registration Status:",
                                     value = if (isRegistered) "Registered" else "Not Registered",
@@ -952,6 +952,7 @@ class MainActivity : ComponentActivity() {
                             TextButton(onClick = {
                                 val formattedUrl = config.formatServerUrl(serverUrl)
                                 config.setTrackingServerUrl(formattedUrl)
+                                config.setAgency(agency)
                                 serverUrl = formattedUrl
                                 currentScreen = AppScreen.MAIN
                             }) {
