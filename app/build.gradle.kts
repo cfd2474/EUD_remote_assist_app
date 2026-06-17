@@ -3,6 +3,11 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val gitCommitHash = providers.exec {
+    commandLine("git", "rev-parse", "--short", "HEAD")
+    isIgnoreExitValue = true
+}.standardOutput.asText.map { it.trim() }.orElse("68c7071")
+
 android {
     namespace = "com.cfd2474.eudremoteassist"
     compileSdk {
@@ -14,8 +19,12 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "2.0.0"
+        buildConfigField("String", "GIT_HASH", "\"${gitCommitHash.get()}\"")
     }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
