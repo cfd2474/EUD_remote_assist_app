@@ -442,12 +442,15 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
             "REMOTE_UNLOCK" -> {
                 val pin = json.get("pin")?.asString
                 if (!pin.isNullOrEmpty()) {
+                    wakeDevice()
                     val accessibilityService = RemoteAssistAccessibilityService.instance
                     if (accessibilityService != null) {
-                        accessibilityService.performRemoteUnlock(pin)
-                        unlockAttempt = 0
-                        handler.removeCallbacks(checkUnlockRunnable)
-                        handler.post(checkUnlockRunnable)
+                        handler.postDelayed({
+                            accessibilityService.performRemoteUnlock(pin)
+                            unlockAttempt = 0
+                            handler.removeCallbacks(checkUnlockRunnable)
+                            handler.post(checkUnlockRunnable)
+                        }, 500L)
                     } else {
                         Log.w(TAG, "Accessibility service not running, cannot unlock")
                         sendDeviceEvent("COMMAND_FAILED", JsonObject().apply {
