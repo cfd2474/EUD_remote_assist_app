@@ -3,8 +3,7 @@
     <restriction
         android:key="tracking_server_url"
         android:title="Tracking Server URL"
-        android:restrictionType="string"
-        android:defaultValue="https://remote.tak-solutions.com:8448" />
+        android:restrictionType="string" />
     <restriction
         android:key="connection_secret"
         android:title="Connection Secret"
