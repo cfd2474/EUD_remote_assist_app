@@ -121,7 +121,7 @@ class MainActivity : ComponentActivity() {
             startService(gatewayIntent)
         }
 
-        updateMissingPermissions()
+        updatePermissionStates()
         if (config.getConnectionSecret().isNullOrBlank() && !config.getTrackingServerUrl().isNullOrBlank()) {
             registerDeviceFlow(this)
         }
@@ -146,18 +146,41 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
     }
 
-    override fun onResume() {
-        super.onResume()
+    private fun isAccessibilityServiceEnabled(context: Context, serviceClass: Class<*>): Boolean {
+        val expectedComponentName = ComponentName(context, serviceClass)
+        val enabledServices = Settings.Secure.getString(
+            context.contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ) ?: return false
+
+        val colonSplitter = android.text.TextUtils.SimpleStringSplitter(':')
+        colonSplitter.setString(enabledServices)
+        while (colonSplitter.hasNext()) {
+            val componentNameString = colonSplitter.next()
+            val enabledComponent = ComponentName.unflattenFromString(componentNameString)
+            if (enabledComponent != null && enabledComponent == expectedComponentName) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun updatePermissionStates() {
         val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
         val adminComponent = ComponentName(this, com.cfd2474.eudremoteassist.receiver.DeviceAdminReceiver::class.java)
         isAdminActiveState.value = dpm.isAdminActive(adminComponent)
         isRegisteredState.value = !config.getConnectionSecret().isNullOrBlank()
-        isAccessibilityActiveState.value = com.cfd2474.eudremoteassist.service.RemoteAssistAccessibilityService.instance != null
+        isAccessibilityActiveState.value = isAccessibilityServiceEnabled(this, com.cfd2474.eudremoteassist.service.RemoteAssistAccessibilityService::class.java)
         isOverlayActiveState.value = Settings.canDrawOverlays(this)
         val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
         isBatteryIgnoringState.value = powerManager.isIgnoringBatteryOptimizations(packageName)
         updateMissingPermissions()
         isBootStartEnabledState.value = config.isBootStartEnabled()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updatePermissionStates()
     }
 
     override fun onNewIntent(intent: Intent) {
