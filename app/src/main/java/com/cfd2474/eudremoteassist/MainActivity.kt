@@ -900,18 +900,16 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(80.dp))
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text(
+                            text = "v${BuildInfo.VERSION_NAME}",
+                            color = Color.Gray.copy(alpha = 0.6f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Spacer(modifier = Modifier.height(24.dp))
                     }
-                    Text(
-                        text = "v${BuildInfo.VERSION_NAME}",
-                        color = Color.Gray.copy(alpha = 0.6f),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 8.dp)
-                    )
                 }
             }
 
@@ -1119,18 +1117,16 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
-                        Spacer(modifier = Modifier.height(80.dp))
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text(
+                            text = "v${BuildInfo.VERSION_NAME}",
+                            color = Color.Gray.copy(alpha = 0.6f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Spacer(modifier = Modifier.height(24.dp))
                     }
-                    Text(
-                        text = "v${BuildInfo.VERSION_NAME}",
-                        color = Color.Gray.copy(alpha = 0.6f),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 8.dp)
-                    )
                 }
             }
         }
