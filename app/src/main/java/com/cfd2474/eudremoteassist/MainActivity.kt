@@ -601,12 +601,7 @@ class MainActivity : ComponentActivity() {
                             textAlign = TextAlign.Center
                         )
 
-                        Text(
-                            text = "Client Build Label: ${BuildInfo.LABEL}",
-                            color = Color.Gray,
-                            fontSize = 13.sp,
-                            textAlign = TextAlign.Center
-                        )
+
 
                         // Info Card
                         Card(
@@ -908,7 +903,7 @@ class MainActivity : ComponentActivity() {
                         Spacer(modifier = Modifier.height(80.dp))
                     }
                     Text(
-                        text = "v${BuildInfo.VERSION_NAME} • ${BuildInfo.GIT_HASH}",
+                        text = "v${BuildInfo.VERSION_NAME}",
                         color = Color.Gray.copy(alpha = 0.6f),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
@@ -1127,7 +1122,7 @@ class MainActivity : ComponentActivity() {
                         Spacer(modifier = Modifier.height(80.dp))
                     }
                     Text(
-                        text = "v${BuildInfo.VERSION_NAME} • ${BuildInfo.GIT_HASH}",
+                        text = "v${BuildInfo.VERSION_NAME}",
                         color = Color.Gray.copy(alpha = 0.6f),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
