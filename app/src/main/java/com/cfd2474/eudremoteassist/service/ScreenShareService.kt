@@ -137,6 +137,7 @@ class ScreenShareService : Service() {
         if (instance === this) {
             instance = null
         }
+        handler.removeCallbacksAndMessages(null)
         teardownSession()
         displayManager?.unregisterDisplayListener(displayListener)
         backgroundExecutor.shutdown()
@@ -181,8 +182,10 @@ class ScreenShareService : Service() {
         RemoteSessionState.captureWidth = capW
         RemoteSessionState.captureHeight = capH
 
-        backgroundExecutor.execute {
-            pipeline?.changeFormat(capW, capH)
+        if (!backgroundExecutor.isShutdown) {
+            backgroundExecutor.execute {
+                pipeline?.changeFormat(capW, capH)
+            }
         }
 
         // Send ORIENTATION_CHANGED device event
@@ -196,12 +199,14 @@ class ScreenShareService : Service() {
 
         // Force a renegotiation 500ms after display rotation
         handler.postDelayed({
-            backgroundExecutor.execute {
-                Log.d(TAG, "Sending WEBRTC_READY after rotation to force fresh offer")
-                val readyJson = JsonObject().apply {
-                    addProperty("type", "webrtc_ready")
+            if (!backgroundExecutor.isShutdown) {
+                backgroundExecutor.execute {
+                    Log.d(TAG, "Sending WEBRTC_READY after rotation to force fresh offer")
+                    val readyJson = JsonObject().apply {
+                        addProperty("type", "webrtc_ready")
+                    }
+                    networkManager.sendWebSocket(gson.toJson(readyJson))
                 }
-                networkManager.sendWebSocket(gson.toJson(readyJson))
             }
         }, 500L)
     }
@@ -218,28 +223,30 @@ class ScreenShareService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
 
-        backgroundExecutor.execute {
-            try {
-                sessionManager = WebRtcSessionManager(this, networkManager) {
-                    pipeline?.getLocalVideoTrack()
+        if (!backgroundExecutor.isShutdown) {
+            backgroundExecutor.execute {
+                try {
+                    sessionManager = WebRtcSessionManager(this, networkManager) {
+                        pipeline?.getLocalVideoTrack()
+                    }
+
+                    sessionManager?.createPeerConnection()
+
+                    val factory = sessionManager!!.getFactory()
+                    
+                    pipeline = ScreenCapturePipeline(this, factory, resultData, sessionManager?.getEglContext()) {
+                        onFirstFrameCaptured()
+                    }
+                    
+                    pipeline?.start()
+
+                    // Start polling signaling Fallback
+                    handler.post(pollRunnable)
+
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error starting ScreenShare session: ${e.message}", e)
+                    handler.post { stopSelf() }
                 }
-
-                sessionManager?.createPeerConnection()
-
-                val factory = sessionManager!!.getFactory()
-                
-                pipeline = ScreenCapturePipeline(this, factory, resultData, sessionManager?.getEglContext()) {
-                    onFirstFrameCaptured()
-                }
-                
-                pipeline?.start()
-
-                // Start polling signaling Fallback
-                handler.post(pollRunnable)
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Error starting ScreenShare session: ${e.message}", e)
-                handler.post { stopSelf() }
             }
         }
     }
@@ -268,31 +275,33 @@ class ScreenShareService : Service() {
             return
         }
 
-        backgroundExecutor.execute {
-            try {
-                val json = gson.fromJson(signalText, JsonObject::class.java)
-                val type = json.get("type")?.asString
-                if (type == "webrtc") {
-                    if (json.has("sdp")) {
-                        val sdpObj = json.getAsJsonObject("sdp")
-                        val sdpType = sdpObj.get("type")?.asString
-                        val sdpStr = sdpObj.get("sdp")?.asString
-                        if (sdpType == "offer" && sdpStr != null) {
-                            sessionManager?.handleOffer(sdpStr)
-                        }
-                    } else if (json.has("ice")) {
-                        val iceObj = json.getAsJsonObject("ice")
-                        val candidate = iceObj.get("candidate")?.asString
-                        val sdpMid = iceObj.get("sdpMid")?.asString
-                        val sdpMLineIndex = iceObj.get("sdpMLineIndex")?.asInt
-                        if (candidate != null && sdpMid != null && sdpMLineIndex != null) {
-                            val iceCandidate = IceCandidate(sdpMid, sdpMLineIndex, candidate)
-                            sessionManager?.handleRemoteIceCandidate(iceCandidate)
+        if (!backgroundExecutor.isShutdown) {
+            backgroundExecutor.execute {
+                try {
+                    val json = gson.fromJson(signalText, JsonObject::class.java)
+                    val type = json.get("type")?.asString
+                    if (type == "webrtc") {
+                        if (json.has("sdp")) {
+                            val sdpObj = json.getAsJsonObject("sdp")
+                            val sdpType = sdpObj.get("type")?.asString
+                            val sdpStr = sdpObj.get("sdp")?.asString
+                            if (sdpType == "offer" && sdpStr != null) {
+                                sessionManager?.handleOffer(sdpStr)
+                            }
+                        } else if (json.has("ice")) {
+                            val iceObj = json.getAsJsonObject("ice")
+                            val candidate = iceObj.get("candidate")?.asString
+                            val sdpMid = iceObj.get("sdpMid")?.asString
+                            val sdpMLineIndex = iceObj.get("sdpMLineIndex")?.asInt
+                            if (candidate != null && sdpMid != null && sdpMLineIndex != null) {
+                                val iceCandidate = IceCandidate(sdpMid, sdpMLineIndex, candidate)
+                                sessionManager?.handleRemoteIceCandidate(iceCandidate)
+                            }
                         }
                     }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error handling signaling message: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error handling signaling message: ${e.message}")
             }
         }
     }
