@@ -35,6 +35,10 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "device_gateway"
         private const val ACTION_RESTRICTIONS_CHANGED = Intent.ACTION_APPLICATION_RESTRICTIONS_CHANGED
+
+        @Volatile
+        var instance: DeviceGatewayService? = null
+            private set
     }
 
     private lateinit var config: ManagedConfigManager
@@ -103,6 +107,7 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "DeviceGatewayService onCreate")
+        instance = this
         config = ManagedConfigManager(this)
         networkManager = NetworkManager.getInstance(this, config)
         networkManager.setWebSocketMessageListener(this)
@@ -147,6 +152,9 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
     override fun onDestroy() {
         super.onDestroy()
         Log.i(TAG, "DeviceGatewayService onDestroy")
+        if (instance === this) {
+            instance = null
+        }
         unregisterReceiver(restrictionsReceiver)
         handler.removeCallbacksAndMessages(null)
         networkManager.setWebSocketMessageListener(null)
@@ -367,23 +375,37 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
         networkManager.sendWebSocket(gson.toJson(msg))
     }
 
-    // Unlock status check loop (polls isKeyguardLocked every 500ms for up to 5s)
-    private fun checkUnlockStatus(attempt: Int = 0) {
-        val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-        if (!keyguardManager.isKeyguardLocked) {
-            Log.i(TAG, "Device successfully unlocked via REMOTE_UNLOCK")
-            sendDeviceEvent("COMMAND_HANDLED", JsonObject().apply {
-                addProperty("command", "REMOTE_UNLOCK")
-            })
-            // Keyguard is now unlocked, resume screen share / remote session setup automatically
-            handleCommand("START_REMOTE_ADMIN")
-        } else if (attempt < 10) {
-            handler.postDelayed({ checkUnlockStatus(attempt + 1) }, 500L)
-        } else {
-            Log.w(TAG, "Device failed to unlock after 5 seconds")
+    private var unlockAttempt = 0
+    private val checkUnlockRunnable = object : Runnable {
+        override fun run() {
+            val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+            if (!keyguardManager.isKeyguardLocked) {
+                Log.i(TAG, "Device successfully unlocked via REMOTE_UNLOCK")
+                sendDeviceEvent("COMMAND_HANDLED", JsonObject().apply {
+                    addProperty("command", "REMOTE_UNLOCK")
+                })
+                // Keyguard is now unlocked, resume screen share / remote session setup automatically
+                handleCommand("START_REMOTE_ADMIN")
+            } else if (unlockAttempt < 10) {
+                unlockAttempt++
+                handler.postDelayed(this, 500L)
+            } else {
+                Log.w(TAG, "Device failed to unlock after 5 seconds")
+                sendDeviceEvent("COMMAND_FAILED", JsonObject().apply {
+                    addProperty("command", "REMOTE_UNLOCK")
+                    addProperty("error", "Incorrect PIN or unlock timeout")
+                })
+            }
+        }
+    }
+
+    fun notifyPasswordFailed() {
+        handler.post {
+            Log.w(TAG, "notifyPasswordFailed: Incorrect PIN detected!")
+            handler.removeCallbacks(checkUnlockRunnable)
             sendDeviceEvent("COMMAND_FAILED", JsonObject().apply {
                 addProperty("command", "REMOTE_UNLOCK")
-                addProperty("error", "Incorrect PIN or unlock timeout")
+                addProperty("error", "Incorrect PIN or password")
             })
         }
     }
@@ -423,7 +445,9 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
                     val accessibilityService = RemoteAssistAccessibilityService.instance
                     if (accessibilityService != null) {
                         accessibilityService.performRemoteUnlock(pin)
-                        checkUnlockStatus(0)
+                        unlockAttempt = 0
+                        handler.removeCallbacks(checkUnlockRunnable)
+                        handler.post(checkUnlockRunnable)
                     } else {
                         Log.w(TAG, "Accessibility service not running, cannot unlock")
                         sendDeviceEvent("COMMAND_FAILED", JsonObject().apply {

@@ -22,4 +22,11 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
         Log.i(TAG, "Device Admin Disabled")
         Toast.makeText(context, "Device Admin Disabled for EUD Remote Assist", Toast.LENGTH_SHORT).show()
     }
+
+    @Deprecated("Deprecated in Java")
+    override fun onPasswordFailed(context: Context, intent: Intent) {
+        super.onPasswordFailed(context, intent)
+        Log.w(TAG, "Device PIN/Password attempt failed!")
+        com.cfd2474.eudremoteassist.service.DeviceGatewayService.instance?.notifyPasswordFailed()
+    }
 }
