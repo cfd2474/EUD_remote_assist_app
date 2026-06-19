@@ -731,6 +731,16 @@ class MainActivity : ComponentActivity() {
                                                         networkManager.disconnectWebSocket()
                                                         networkManager.connectWebSocket()
                                                         Toast.makeText(context, "Connection Refreshed!", Toast.LENGTH_SHORT).show()
+                                                        
+                                                        // Trigger immediate telemetry sending
+                                                        val telemetryIntent = Intent(context, com.cfd2474.eudremoteassist.service.DeviceGatewayService::class.java).apply {
+                                                            action = com.cfd2474.eudremoteassist.service.DeviceGatewayService.ACTION_SEND_TELEMETRY
+                                                        }
+                                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                                            context.startForegroundService(telemetryIntent)
+                                                        } else {
+                                                            context.startService(telemetryIntent)
+                                                        }
                                                     } else {
                                                         networkManager.connectWebSocket()
                                                         Toast.makeText(context, "Refresh Failed: $error. Reconnecting...", Toast.LENGTH_LONG).show()
@@ -1271,6 +1281,16 @@ class MainActivity : ComponentActivity() {
                     // Restart websocket to connect with secret
                     networkManager.disconnectWebSocket()
                     networkManager.connectWebSocket()
+
+                    // Trigger immediate telemetry sending
+                    val telemetryIntent = Intent(context, com.cfd2474.eudremoteassist.service.DeviceGatewayService::class.java).apply {
+                        action = com.cfd2474.eudremoteassist.service.DeviceGatewayService.ACTION_SEND_TELEMETRY
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(telemetryIntent)
+                    } else {
+                        context.startService(telemetryIntent)
+                    }
                 } else {
                     Toast.makeText(context, "Registration Failed: $error", Toast.LENGTH_LONG).show()
                 }

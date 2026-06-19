@@ -35,6 +35,7 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "device_gateway"
         private const val ACTION_RESTRICTIONS_CHANGED = Intent.ACTION_APPLICATION_RESTRICTIONS_CHANGED
+        const val ACTION_SEND_TELEMETRY = "com.cfd2474.eudremoteassist.ACTION_SEND_TELEMETRY"
 
         @Volatile
         var instance: DeviceGatewayService? = null
@@ -146,6 +147,12 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
             }
             stopSelf()
         }
+
+        if (intent?.action == ACTION_SEND_TELEMETRY) {
+            Log.i(TAG, "ACTION_SEND_TELEMETRY intent received. Triggering immediate telemetry report.")
+            sendTelemetryReport()
+        }
+
         return START_STICKY
     }
 
