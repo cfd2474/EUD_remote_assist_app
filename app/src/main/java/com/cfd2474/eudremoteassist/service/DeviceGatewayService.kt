@@ -353,6 +353,9 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
 
                     networkManager.disconnectWebSocket()
                     networkManager.connectWebSocket()
+
+                    // Send telemetry report immediately upon successful re-registration
+                    sendTelemetryReport()
                 } else {
                     Log.w(TAG, "Health Check Recovery: Re-registration failed on attempt $attemptNum: $error")
                     scheduleRecoveryStep(attemptNum + 1)
@@ -629,25 +632,32 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
     private fun sendTelemetryReport() {
         val batteryLevel = getBatteryLevel()
         val isCharging = getBatteryChargingStatus()
+        Log.i(TAG, "Initiating immediate telemetry report. Battery: $batteryLevel%, Charging: $isCharging")
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
             ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
         ) {
             Log.w(TAG, "Location permissions not granted, sending telemetry with 0.0, 0.0")
-            networkManager.sendTelemetry(0.0, 0.0, 0f, batteryLevel, isCharging) { _, _ -> }
+            networkManager.sendTelemetry(0.0, 0.0, 0f, batteryLevel, isCharging) { success, error ->
+                Log.i(TAG, "Telemetry sending result (no location permission): success=$success, error=$error")
+            }
             return
         }
 
         try {
             fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
                 if (location != null) {
+                    Log.d(TAG, "Using last known location for telemetry: ${location.latitude}, ${location.longitude}")
                     networkManager.sendTelemetry(
                         location.latitude,
                         location.longitude,
                         location.accuracy,
                         batteryLevel,
                         isCharging
-                    ) { _, _ -> }
+                    ) { success, error ->
+                        Log.i(TAG, "Telemetry sending result (last location): success=$success, error=$error")
+                    }
                 } else {
+                    Log.i(TAG, "Last location is null. Requesting fresh location update...")
                     // Force a single location update request
                     val cancellationTokenSource = CancellationTokenSource()
                     fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cancellationTokenSource.token)
@@ -655,20 +665,29 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
                             val lat = loc?.latitude ?: 0.0
                             val lon = loc?.longitude ?: 0.0
                             val acc = loc?.accuracy ?: 0f
-                            networkManager.sendTelemetry(lat, lon, acc, batteryLevel, isCharging) { _, _ -> }
+                            Log.d(TAG, "Fresh location retrieved: $lat, $lon")
+                            networkManager.sendTelemetry(lat, lon, acc, batteryLevel, isCharging) { success, error ->
+                                Log.i(TAG, "Telemetry sending result (fresh location): success=$success, error=$error")
+                            }
                         }
                         .addOnFailureListener { e ->
                             Log.e(TAG, "Failed to get current location: ${e.message}")
-                            networkManager.sendTelemetry(0.0, 0.0, 0f, batteryLevel, isCharging) { _, _ -> }
+                            networkManager.sendTelemetry(0.0, 0.0, 0f, batteryLevel, isCharging) { success, error ->
+                                Log.i(TAG, "Telemetry sending result (location request failed): success=$success, error=$error")
+                            }
                         }
                 }
             }.addOnFailureListener { e ->
                 Log.e(TAG, "Failed to get last location: ${e.message}")
-                networkManager.sendTelemetry(0.0, 0.0, 0f, batteryLevel, isCharging) { _, _ -> }
+                networkManager.sendTelemetry(0.0, 0.0, 0f, batteryLevel, isCharging) { success, error ->
+                    Log.i(TAG, "Telemetry sending result (last location request failed): success=$success, error=$error")
+                }
             }
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException during location check: ${e.message}")
-            networkManager.sendTelemetry(0.0, 0.0, 0f, batteryLevel, isCharging) { _, _ -> }
+            networkManager.sendTelemetry(0.0, 0.0, 0f, batteryLevel, isCharging) { success, error ->
+                Log.i(TAG, "Telemetry sending result (security exception): success=$success, error=$error")
+            }
         }
     }
 
