@@ -1,7 +1,7 @@
 package com.cfd2474.eudremoteassist
 
 object BuildInfo {
-    const val VERSION_NAME = "2.0.3"
+    const val VERSION_NAME = "2.0.6"
     const val LABEL = "v2-doc-rebuild"
     val GIT_HASH: String = BuildConfig.GIT_HASH
 }

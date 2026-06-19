@@ -151,13 +151,15 @@ class MainActivity : ComponentActivity() {
         val enabledServices = Settings.Secure.getString(
             context.contentResolver,
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: return false
+        ) ?: ""
+        Log.i(TAG, "isAccessibilityServiceEnabled: enabledServices='$enabledServices', expected='$expectedComponentName'")
 
         val colonSplitter = android.text.TextUtils.SimpleStringSplitter(':')
         colonSplitter.setString(enabledServices)
         while (colonSplitter.hasNext()) {
             val componentNameString = colonSplitter.next()
             val enabledComponent = ComponentName.unflattenFromString(componentNameString)
+            Log.d(TAG, "Checking service component: '$componentNameString' -> unflattened: '$enabledComponent'")
             if (enabledComponent != null && enabledComponent == expectedComponentName) {
                 return true
             }
@@ -284,6 +286,7 @@ class MainActivity : ComponentActivity() {
         var showMdmPasswordNoticeDialog by remember { mutableStateOf(false) }
         var showAccessibilitySetupDialog by remember { mutableStateOf(false) }
         var showRestrictedSettingsDialog by remember { mutableStateOf(false) }
+        var showMissingPermissionsDialog by remember { mutableStateOf(false) }
 
         var timeSinceLastHeartbeat by remember { mutableStateOf("N/A") }
 
@@ -582,6 +585,48 @@ class MainActivity : ComponentActivity() {
                 },
                 dismissButton = {
                     TextButton(onClick = { showRestrictedSettingsDialog = false }) {
+                        Text("Cancel", color = Color.Gray)
+                    }
+                },
+                containerColor = Color(0xFF1E293B)
+            )
+        }
+
+        if (showMissingPermissionsDialog) {
+            val missingList = mutableListOf<String>()
+            if (missingPermissions.isNotEmpty()) missingList.add("Basic Permissions")
+            if (!isAccessibilityActive) missingList.add("Remote Control")
+            if (!isOverlayActive) missingList.add("System Overlays")
+            if (!isBatteryIgnoring) missingList.add("Battery Optimization")
+            if (!isAdminActive) missingList.add("Device Administrator")
+            if (!isBootStartEnabled) missingList.add("Launch on Reboot")
+
+            AlertDialog(
+                onDismissRequest = { showMissingPermissionsDialog = false },
+                title = { Text("Permissions Required", color = Color.White, fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("To register this device with the portal, you must first enable all required controls:", color = Color.LightGray)
+                        missingList.forEach { permissionName ->
+                            Text("• $permissionName", color = Color(0xFFFCA5A5), fontWeight = FontWeight.SemiBold)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Would you like to go to the Permission Setup screen to enable them?", color = Color.LightGray)
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showMissingPermissionsDialog = false
+                            currentScreen = AppScreen.MAIN
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
+                    ) {
+                        Text("Go to Setup", color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showMissingPermissionsDialog = false }) {
                         Text("Cancel", color = Color.Gray)
                     }
                 },
@@ -1077,67 +1122,85 @@ class MainActivity : ComponentActivity() {
 
                                 Spacer(modifier = Modifier.height(8.dp))
 
-                                Button(
-                                    onClick = {
-                                        val formattedUrl = config.formatServerUrl(serverUrl)
-                                        config.setTrackingServerUrl(formattedUrl)
-                                        config.setAgency(agency)
-                                        serverUrl = formattedUrl
-                                        registerDeviceFlow(context)
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(8.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFF0284C7) // Sky 600
-                                    )
-                                ) {
-                                    Text("Register with Portal", color = Color.White, fontWeight = FontWeight.SemiBold)
-                                }
+                                 val allPermissionsGranted = missingPermissions.isEmpty() &&
+                                         isAccessibilityActive &&
+                                         isOverlayActive &&
+                                         isBatteryIgnoring &&
+                                         isAdminActive &&
+                                         isBootStartEnabled
 
-                                Spacer(modifier = Modifier.height(8.dp))
+                                 if (!allPermissionsGranted) {
+                                     val missingList = mutableListOf<String>()
+                                     if (missingPermissions.isNotEmpty()) missingList.add("Basic")
+                                     if (!isAccessibilityActive) missingList.add("Remote Control")
+                                     if (!isOverlayActive) missingList.add("System Overlays")
+                                     if (!isBatteryIgnoring) missingList.add("Battery Optimization")
+                                     if (!isAdminActive) missingList.add("Device Administrator")
+                                     if (!isBootStartEnabled) missingList.add("Launch on Reboot")
 
-                                Button(
-                                    onClick = {
-                                        if (config.isPasswordMdmManaged()) {
-                                            showMdmPasswordNoticeDialog = true
-                                        } else {
-                                            showChangePasswordDialog = true
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(8.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFF475569) // Slate 600
-                                    )
-                                ) {
-                                    Text("Change Settings Password", color = Color.White, fontWeight = FontWeight.SemiBold)
-                                }
+                                     Card(
+                                         colors = CardDefaults.cardColors(containerColor = Color(0xFF451A1A)),
+                                         shape = RoundedCornerShape(8.dp),
+                                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                                     ) {
+                                         Column(modifier = Modifier.padding(12.dp)) {
+                                             Text(
+                                                 text = "Cannot Register: Missing permissions",
+                                                 color = Color(0xFFF87171),
+                                                 fontWeight = FontWeight.Bold,
+                                                 fontSize = 14.sp
+                                             )
+                                             Spacer(modifier = Modifier.height(4.dp))
+                                             Text(
+                                                 text = "Please enable: ${missingList.joinToString(", ")}",
+                                                 color = Color(0xFFFCA5A5),
+                                                 fontSize = 13.sp
+                                             )
+                                         }
+                                     }
+                                 }
 
-                                val allPermissionsGranted = missingPermissions.isEmpty() &&
-                                        isAccessibilityActive &&
-                                        isOverlayActive &&
-                                        isBatteryIgnoring &&
-                                        isAdminActive &&
-                                        isBootStartEnabled
+                                 Spacer(modifier = Modifier.height(8.dp))
 
-                                if (!allPermissionsGranted) {
-                                    val missingList = mutableListOf<String>()
-                                    if (missingPermissions.isNotEmpty()) missingList.add("Basic")
-                                    if (!isAccessibilityActive) missingList.add("Remote Control")
-                                    if (!isOverlayActive) missingList.add("System Overlays")
-                                    if (!isBatteryIgnoring) missingList.add("Battery Optimization")
-                                    if (!isAdminActive) missingList.add("Device Administrator")
-                                    if (!isBootStartEnabled) missingList.add("Launch on Reboot")
+                                 Button(
+                                     onClick = {
+                                         val formattedUrl = config.formatServerUrl(serverUrl)
+                                         config.setTrackingServerUrl(formattedUrl)
+                                         config.setAgency(agency)
+                                         serverUrl = formattedUrl
+                                         if (!allPermissionsGranted) {
+                                             showMissingPermissionsDialog = true
+                                         } else {
+                                             registerDeviceFlow(context)
+                                         }
+                                     },
+                                     modifier = Modifier.fillMaxWidth(),
+                                     shape = RoundedCornerShape(8.dp),
+                                     colors = ButtonDefaults.buttonColors(
+                                         containerColor = Color(0xFF0284C7) // Sky 600
+                                     )
+                                 ) {
+                                     Text("Register with Portal", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                 }
 
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = "Cannot Register: Missing permission controls (${missingList.joinToString(", ")})",
-                                        color = Color(0xFFF87171),
-                                        fontSize = 13.sp,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                }
+                                 Spacer(modifier = Modifier.height(8.dp))
+
+                                 Button(
+                                     onClick = {
+                                         if (config.isPasswordMdmManaged()) {
+                                             showMdmPasswordNoticeDialog = true
+                                         } else {
+                                             showChangePasswordDialog = true
+                                         }
+                                     },
+                                     modifier = Modifier.fillMaxWidth(),
+                                     shape = RoundedCornerShape(8.dp),
+                                     colors = ButtonDefaults.buttonColors(
+                                         containerColor = Color(0xFF475569) // Slate 600
+                                     )
+                                 ) {
+                                     Text("Change Settings Password", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                 }
                             }
                         }
                         Spacer(modifier = Modifier.height(24.dp))
@@ -1173,6 +1236,7 @@ class MainActivity : ComponentActivity() {
         val isBatteryIgnoring = isBatteryIgnoringState.value
         val isAdminActive = isAdminActiveState.value
         val isBootStartEnabled = isBootStartEnabledState.value
+        Log.i(TAG, "checkAllPermissionsGranted: basicGranted=$basicGranted, isAccessibilityActive=$isAccessibilityActive, isOverlayActive=$isOverlayActive, isBatteryIgnoring=$isBatteryIgnoring, isAdminActive=$isAdminActive, isBootStartEnabled=$isBootStartEnabled")
         return basicGranted && isAccessibilityActive && isOverlayActive && isBatteryIgnoring && isAdminActive && isBootStartEnabled
     }
 

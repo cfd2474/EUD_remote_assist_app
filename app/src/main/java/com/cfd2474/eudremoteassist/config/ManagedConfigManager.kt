@@ -119,7 +119,7 @@ class ManagedConfigManager(private val context: Context) {
     }
 
     fun isBootStartEnabled(): Boolean {
-        return sharedPrefs.getBoolean("boot_start_enabled", false)
+        return sharedPrefs.getBoolean("boot_start_enabled", true)
     }
 
     fun setBootStartEnabled(enabled: Boolean) {
