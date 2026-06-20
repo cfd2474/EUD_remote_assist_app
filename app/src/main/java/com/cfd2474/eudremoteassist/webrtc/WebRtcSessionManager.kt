@@ -253,7 +253,8 @@ class WebRtcSessionManager(
                         }
                         
                         networkManager.sendWebSocket(gson.toJson(outerJson))
-                        minimizeApp()
+                        // minimizeApp() removed to prevent Android 14 single-app capture from pausing the stream when backgrounded.
+                        // The user or remote admin can minimize the app manually if needed.
                     }
 
                     override fun onSetFailure(error: String?) {
