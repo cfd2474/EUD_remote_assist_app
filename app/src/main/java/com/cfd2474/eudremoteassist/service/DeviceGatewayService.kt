@@ -12,6 +12,7 @@ import android.provider.Settings
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.cfd2474.eudremoteassist.BuildInfo
 import com.cfd2474.eudremoteassist.MainActivity
 import com.cfd2474.eudremoteassist.PingActivity
@@ -117,7 +118,7 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
         createNotificationChannel()
 
         // Register application restrictions change receiver
-        registerReceiver(restrictionsReceiver, IntentFilter(ACTION_RESTRICTIONS_CHANGED))
+        ContextCompat.registerReceiver(this, restrictionsReceiver, IntentFilter(ACTION_RESTRICTIONS_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
 
         // Connect WebSocket and launch schedulers
         networkManager.connectWebSocket()
@@ -213,16 +214,10 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
                     cancelHealthRecovery()
                 }
                 "command" -> {
-                    val connectionSecret = json.get("connection_secret")?.asString
-                    val currentSecret = config.getConnectionSecret()
-                    if (connectionSecret == currentSecret) {
-                        val command = json.get("command")?.asString
-                        if (command != null) {
-                            Log.i(TAG, "Validated command: $command")
-                            handleCommand(command, json)
-                        }
-                    } else {
-                        Log.w(TAG, "Command connection secret mismatch! Expected: $currentSecret, Received: $connectionSecret")
+                    val command = json.get("command")?.asString
+                    if (command != null) {
+                        Log.i(TAG, "Validated command: $command")
+                        handleCommand(command, json)
                     }
                 }
                 "webrtc" -> {
@@ -450,22 +445,31 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
                 startActivity(mainIntent)
             }
             "REMOTE_UNLOCK" -> {
-                val pin = json.get("pin")?.asString
-                if (!pin.isNullOrEmpty()) {
-                    wakeDevice()
-                    val accessibilityService = RemoteAssistAccessibilityService.instance
-                    if (accessibilityService != null) {
-                        handler.postDelayed({
-                            accessibilityService.performRemoteUnlock(pin)
-                            unlockAttempt = 0
-                            handler.removeCallbacks(checkUnlockRunnable)
-                            handler.post(checkUnlockRunnable)
-                        }, 500L)
-                    } else {
-                        Log.w(TAG, "Accessibility service not running, cannot unlock")
+                val encryptedPin = json.get("pin")?.asString
+                if (!encryptedPin.isNullOrEmpty()) {
+                    try {
+                        val pin = com.cfd2474.eudremoteassist.crypto.CryptoManager.decryptPayload(encryptedPin)
+                        wakeDevice()
+                        val accessibilityService = RemoteAssistAccessibilityService.instance
+                        if (accessibilityService != null) {
+                            handler.postDelayed({
+                                accessibilityService.performRemoteUnlock(pin)
+                                unlockAttempt = 0
+                                handler.removeCallbacks(checkUnlockRunnable)
+                                handler.post(checkUnlockRunnable)
+                            }, 500L)
+                        } else {
+                            Log.w(TAG, "Accessibility service not running, cannot unlock")
+                            sendDeviceEvent("COMMAND_FAILED", JsonObject().apply {
+                                addProperty("command", "REMOTE_UNLOCK")
+                                addProperty("error", "Accessibility service not enabled")
+                            })
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to decrypt PIN payload", e)
                         sendDeviceEvent("COMMAND_FAILED", JsonObject().apply {
                             addProperty("command", "REMOTE_UNLOCK")
-                            addProperty("error", "Accessibility service not enabled")
+                            addProperty("error", "Decryption failed")
                         })
                     }
                 } else {
@@ -607,11 +611,8 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
                             val cmdObj = element.asJsonObject
                             val command = cmdObj.get("command")?.asString
                             if (command != null) {
-                                val secret = cmdObj.get("connection_secret")?.asString
-                                if (secret == config.getConnectionSecret()) {
-                                    Log.i(TAG, "Received command via poll fallback: $command")
-                                    handler.post { handleCommand(command, cmdObj) }
-                                }
+                                Log.i(TAG, "Received command via poll fallback: $command")
+                                handler.post { handleCommand(command, cmdObj) }
                             }
                         }
                     }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.provider.Settings
 import android.util.Log
 import com.cfd2474.eudremoteassist.config.ManagedConfigManager
+import com.cfd2474.eudremoteassist.crypto.CryptoManager
 import com.cfd2474.eudremoteassist.session.RemoteSessionState
 import com.google.gson.Gson
 import com.google.gson.JsonObject
@@ -37,11 +38,43 @@ class NetworkManager private constructor(
     }
 
     private val gson = Gson()
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
-        .build()
+    private var _client: OkHttpClient? = null
+    private var _lastPinHash: String? = null
+    private var _lastServerUrl: String? = null
+
+    @Synchronized
+    private fun getClient(): OkHttpClient {
+        val currentPinHash = config.getTlsPinHash()
+        val currentServerUrl = config.getTrackingServerUrl()
+        
+        if (_client != null && currentPinHash == _lastPinHash && currentServerUrl == _lastServerUrl) {
+            return _client!!
+        }
+        
+        val builder = OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            
+        if (!currentPinHash.isNullOrBlank() && !currentServerUrl.isNullOrBlank()) {
+            try {
+                val host = java.net.URL(currentServerUrl).host
+                if (host.isNotEmpty()) {
+                    val pinner = okhttp3.CertificatePinner.Builder()
+                        .add(host, "sha256/$currentPinHash")
+                        .build()
+                    builder.certificatePinner(pinner)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Invalid tracking server URL or Pin Hash", e)
+            }
+        }
+        
+        _lastPinHash = currentPinHash
+        _lastServerUrl = currentServerUrl
+        _client = builder.build()
+        return _client!!
+    }
 
     private var webSocket: WebSocket? = null
     private var isConnected = false
@@ -193,6 +226,12 @@ class NetworkManager private constructor(
             addProperty("app_version", appVersion)
             addProperty("phone_number", getPhoneNumber())
             addProperty("agency", agency)
+            addProperty("public_key", CryptoManager.getOrGeneratePublicKey())
+            
+            val token = config.getEnrollmentToken()
+            if (!token.isNullOrBlank()) {
+                addProperty("enrollment_token", token)
+            }
         }
 
         val request = Request.Builder()
@@ -200,7 +239,7 @@ class NetworkManager private constructor(
             .post(gson.toJson(bodyJson).toRequestBody(JSON_MEDIA_TYPE))
             .build()
 
-        client.newCall(request).enqueue(object : Callback {
+        getClient().newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 Log.e(TAG, "Registration failed: ${e.message}")
                 callback(false, e.message)
@@ -265,7 +304,7 @@ class NetworkManager private constructor(
             .post(gson.toJson(bodyJson).toRequestBody(JSON_MEDIA_TYPE))
             .build()
 
-        client.newCall(request).enqueue(object : Callback {
+        getClient().newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 Log.e(TAG, "Telemetry POST failed: ${e.message}")
                 callback(false, e.message)
@@ -311,7 +350,7 @@ class NetworkManager private constructor(
             .post(gson.toJson(bodyJson).toRequestBody(JSON_MEDIA_TYPE))
             .build()
 
-        client.newCall(request).enqueue(object : Callback {
+        getClient().newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 Log.e(TAG, "Event post failed: ${e.message}")
                 callback(false, e.message)
@@ -346,7 +385,7 @@ class NetworkManager private constructor(
             .get()
             .build()
 
-        client.newCall(request).enqueue(object : Callback {
+        getClient().newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 callback(false, e.message)
             }
@@ -382,7 +421,7 @@ class NetworkManager private constructor(
             .get()
             .build()
 
-        client.newCall(request).enqueue(object : Callback {
+        getClient().newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 callback(false, e.message)
             }
@@ -392,6 +431,10 @@ class NetworkManager private constructor(
                     if (response.isSuccessful) {
                         callback(true, response.body?.string())
                     } else {
+                        if (response.code == 401) {
+                            Log.w(TAG, "Signaling unauthorized (401), clearing secret")
+                            config.clearConnectionSecret()
+                        }
                         callback(false, "HTTP ${response.code}")
                     }
                 }
@@ -419,7 +462,7 @@ class NetworkManager private constructor(
             .post(gson.toJson(messageJson).toRequestBody(JSON_MEDIA_TYPE))
             .build()
 
-        client.newCall(request).enqueue(object : Callback {
+        getClient().newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 Log.e(TAG, "POST signaling failed: ${e.message}")
                 callback(false, e.message)
@@ -427,6 +470,10 @@ class NetworkManager private constructor(
 
             override fun onResponse(call: Call, response: Response) {
                 response.use {
+                    if (response.code == 401) {
+                        Log.w(TAG, "POST signaling unauthorized (401), clearing secret")
+                        config.clearConnectionSecret()
+                    }
                     callback(response.isSuccessful, null)
                 }
             }
@@ -457,7 +504,7 @@ class NetworkManager private constructor(
             .url(wsUrl)
             .build()
 
-        webSocket = client.newWebSocket(request, object : WebSocketListener() {
+        webSocket = getClient().newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "WebSocket open — sending auth within 10 seconds")
                 isConnected = true
@@ -474,7 +521,7 @@ class NetworkManager private constructor(
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                Log.d(TAG, "WebSocket message received: $text")
+                Log.d(TAG, "WebSocket message received: ${redactSensitive(text)}")
                 if (text.contains("\"pong\"") || text.contains("\"auth_ok\"")) {
                     lastHeartbeatTime = System.currentTimeMillis()
                 }
@@ -544,6 +591,22 @@ class NetworkManager private constructor(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse fallback message: ${e.message}")
+        }
+    }
+
+    private fun redactSensitive(json: String): String {
+        return try {
+            val element = com.google.gson.JsonParser.parseString(json)
+            if (element.isJsonObject) {
+                val obj = element.asJsonObject
+                if (obj.has("connection_secret")) obj.addProperty("connection_secret", "***REDACTED***")
+                if (obj.has("pin")) obj.addProperty("pin", "***REDACTED***")
+                if (obj.has("password")) obj.addProperty("password", "***REDACTED***")
+                return obj.toString()
+            }
+            json
+        } catch (e: Exception) {
+            json
         }
     }
 }

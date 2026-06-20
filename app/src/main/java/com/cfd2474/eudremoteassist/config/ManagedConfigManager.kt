@@ -3,10 +3,43 @@ package com.cfd2474.eudremoteassist.config
 import android.content.Context
 import android.content.RestrictionsManager
 import android.os.Bundle
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 
 class ManagedConfigManager(private val context: Context) {
 
-    private val sharedPrefs = context.getSharedPreferences("eud_remote_assist_prefs", Context.MODE_PRIVATE)
+    private val sharedPrefs by lazy {
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        
+        val encryptedPrefs = EncryptedSharedPreferences.create(
+            context,
+            "eud_remote_assist_prefs_enc",
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+        
+        val oldPrefs = context.getSharedPreferences("eud_remote_assist_prefs", Context.MODE_PRIVATE)
+        if (oldPrefs.all.isNotEmpty()) {
+            val editor = encryptedPrefs.edit()
+            oldPrefs.all.forEach { (key, value) ->
+                when (value) {
+                    is String -> editor.putString(key, value)
+                    is Int -> editor.putInt(key, value)
+                    is Boolean -> editor.putBoolean(key, value)
+                    is Float -> editor.putFloat(key, value)
+                    is Long -> editor.putLong(key, value)
+                }
+            }
+            editor.apply()
+            oldPrefs.edit().clear().apply()
+        }
+        
+        encryptedPrefs
+    }
+    
     private val restrictionsManager = context.getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
 
     fun getTrackingServerUrl(): String {
@@ -21,6 +54,30 @@ class ManagedConfigManager(private val context: Context) {
 
     fun setTrackingServerUrl(url: String) {
         sharedPrefs.edit().putString("tracking_server_url", url).apply()
+    }
+
+    fun getTlsPinHash(): String? {
+        val mdmPin = getMdmString("tls_pin_hash")
+        if (!mdmPin.isNullOrBlank()) {
+            return mdmPin
+        }
+        return sharedPrefs.getString("tls_pin_hash", null)
+    }
+
+    fun setTlsPinHash(hash: String) {
+        sharedPrefs.edit().putString("tls_pin_hash", hash).apply()
+    }
+
+    fun getEnrollmentToken(): String? {
+        val mdmToken = getMdmString("enrollment_token")
+        if (!mdmToken.isNullOrBlank()) {
+            return mdmToken
+        }
+        return sharedPrefs.getString("enrollment_token", null)
+    }
+
+    fun setEnrollmentToken(token: String) {
+        sharedPrefs.edit().putString("enrollment_token", token).apply()
     }
 
     fun formatServerUrl(input: String): String {

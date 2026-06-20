@@ -221,7 +221,7 @@ class ShellKeyInjector : KeyInjector {
         if (event.action != KeyEvent.ACTION_DOWN) return true 
 
         return try {
-            val cmd = arrayOf("sh", "-c", "input keyevent ${event.keyCode}")
+            val cmd = arrayOf("input", "keyevent", event.keyCode.toString())
             val process = Runtime.getRuntime().exec(cmd)
             val exitCode = process.waitFor()
             if (exitCode != 0) {

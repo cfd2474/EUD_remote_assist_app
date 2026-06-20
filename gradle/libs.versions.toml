@@ -11,6 +11,9 @@ activityCompose = "1.10.0"
 lifecycle = "2.8.7"
 appcompat = "1.6.1"
 material = "1.10.0"
+securityCrypto = "1.1.0-alpha06"
+camerax = "1.4.0"
+mlkitBarcode = "17.3.0"
 
 [libraries]
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
@@ -26,6 +29,13 @@ google-play-services-location = { group = "com.google.android.gms", name = "play
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 google-webrtc = { group = "io.github.webrtc-sdk", name = "android", version.ref = "webrtc" }
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
+androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
+androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }
+androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
+androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
+androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
+mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcode" }
+guava = { group = "com.google.guava", name = "guava", version = "33.2.1-android" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

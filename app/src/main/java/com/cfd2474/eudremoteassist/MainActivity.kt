@@ -99,6 +99,42 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val qrScannerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            val qrText = result.data?.getStringExtra("QR_RESULT")
+            if (qrText != null) {
+                try {
+                    val json = org.json.JSONObject(qrText)
+                    val serverUrl = json.optString("server_url", "")
+                    val token = json.optString("token", "")
+                    val tlsPin = json.optString("tls_pin", "")
+                    
+                    if (serverUrl.isNotEmpty()) {
+                        val formattedUrl = config.formatServerUrl(serverUrl)
+                        config.setTrackingServerUrl(formattedUrl)
+                        config.setEnrollmentToken(token)
+                        if (tlsPin.isNotEmpty()) {
+                            config.setTlsPinHash(tlsPin)
+                        }
+                        
+                        Toast.makeText(this, "QR Scanned. Registering...", Toast.LENGTH_SHORT).show()
+                        if (missingPermissionsState.value.isNotEmpty()) {
+                            requestInitialPermissions()
+                        } else {
+                            registerDeviceFlow(this)
+                        }
+                    } else {
+                        Toast.makeText(this, "Invalid QR code format", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Failed to parse QR code", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
     private val bgLocationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -211,9 +247,6 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.READ_PHONE_NUMBERS,
-            Manifest.permission.READ_SMS,
-            Manifest.permission.RECEIVE_SMS,
-            Manifest.permission.SEND_SMS,
             Manifest.permission.CALL_PHONE
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -230,9 +263,6 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.READ_PHONE_NUMBERS,
-            Manifest.permission.READ_SMS,
-            Manifest.permission.RECEIVE_SMS,
-            Manifest.permission.SEND_SMS,
             Manifest.permission.CALL_PHONE
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -806,9 +836,6 @@ class MainActivity : ComponentActivity() {
                                              Manifest.permission.ACCESS_COARSE_LOCATION -> "Location"
                                              Manifest.permission.READ_PHONE_STATE -> "Phone State"
                                              Manifest.permission.READ_PHONE_NUMBERS -> "Phone Numbers"
-                                             Manifest.permission.READ_SMS,
-                                             Manifest.permission.RECEIVE_SMS,
-                                             Manifest.permission.SEND_SMS -> "SMS"
                                              Manifest.permission.CALL_PHONE -> "Phone Call"
                                              Manifest.permission.POST_NOTIFICATIONS -> "Notifications"
                                              else -> perm.substringAfterLast('.')
@@ -1190,7 +1217,22 @@ class MainActivity : ComponentActivity() {
                                          containerColor = Color(0xFF0284C7) // Sky 600
                                      )
                                  ) {
-                                     Text("Register with Portal", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                 }
+
+                                 Spacer(modifier = Modifier.height(8.dp))
+
+                                 Button(
+                                     onClick = {
+                                         val intent = Intent(context, QrScannerActivity::class.java)
+                                         qrScannerLauncher.launch(intent)
+                                     },
+                                     modifier = Modifier.fillMaxWidth(),
+                                     shape = RoundedCornerShape(8.dp),
+                                     colors = ButtonDefaults.buttonColors(
+                                         containerColor = Color(0xFF10B981) // Emerald 500
+                                     )
+                                 ) {
+                                     Text("Scan QR to Enroll", color = Color.White, fontWeight = FontWeight.SemiBold)
                                  }
 
                                  Spacer(modifier = Modifier.height(8.dp))
