@@ -217,21 +217,8 @@ class AccessibilityKeyInjector(
 
 class ShellKeyInjector : KeyInjector {
     override fun inject(event: KeyEvent): Boolean {
-        // We only need to inject one event per key press for shell commands
-        if (event.action != KeyEvent.ACTION_DOWN) return true 
-
-        return try {
-            val cmd = arrayOf("input", "keyevent", event.keyCode.toString())
-            val process = Runtime.getRuntime().exec(cmd)
-            val exitCode = process.waitFor()
-            if (exitCode != 0) {
-                Log.w("KeyInjector", "shell input keyevent failed with exit code $exitCode")
-            }
-            exitCode == 0
-        } catch (e: Exception) {
-            Log.w("KeyInjector", "shell input keyevent failed", e)
-            false
-        }
+        Log.w("KeyInjector", "Shell injection is disabled for security (requires root/Shizuku).")
+        return false
     }
 }
 

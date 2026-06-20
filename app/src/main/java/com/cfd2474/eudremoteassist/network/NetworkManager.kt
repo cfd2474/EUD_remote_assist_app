@@ -238,10 +238,16 @@ class NetworkManager private constructor(
 
         Log.i(TAG, "registerDevice JSON Body: $bodyJson")
 
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url(url)
             .post(gson.toJson(bodyJson).toRequestBody(JSON_MEDIA_TYPE))
-            .build()
+
+        val existingSecret = config.getConnectionSecret()
+        if (!existingSecret.isNullOrBlank()) {
+            requestBuilder.addHeader("x-connection-secret", existingSecret)
+        }
+
+        val request = requestBuilder.build()
 
         getClient().newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {

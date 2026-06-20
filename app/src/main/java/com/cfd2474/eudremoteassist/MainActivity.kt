@@ -867,7 +867,7 @@ class MainActivity : ComponentActivity() {
         }
 
         Log.i(TAG, "Starting clean de-registration before registering...")
-        config.clearConnectionSecret()
+        // Do NOT clear connection secret here, as we need to send it in the /register request for Proof of Possession
         isRegisteredState.value = false
         networkManager.disconnectWebSocket()
 
