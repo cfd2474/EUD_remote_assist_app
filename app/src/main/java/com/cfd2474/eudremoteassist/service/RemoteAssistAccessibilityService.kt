@@ -29,6 +29,7 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
     }
 
     private var lastSwipeTime = 0L
+    private var lastProjectionClickTime = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -219,43 +220,80 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
 
     private fun findAndClickMediaProjectionButtons(node: AccessibilityNodeInfo?) {
         if (node == null) return
+        if (System.currentTimeMillis() - lastProjectionClickTime < 500) return
 
-        // 1. Look for specific system button IDs and text patterns
-        val textToFind = listOf("Start now", "Allow", "Entire screen", "Start recording", "START NOW", "ALLOW")
-        val idsToFind = listOf(
-            "android:id/button1", // Standard "OK/Positive" button ID
-            "com.android.systemui:id/remember_checkbox",
-            "com.android.systemui:id/button_start_now",
-            "com.android.systemui:id/start_button"
-        )
-        
-        // Try IDs first (more reliable)
-        for (id in idsToFind) {
-            val nodes = node.findAccessibilityNodeInfosByViewId(id)
-            for (foundNode in nodes) {
-                if (foundNode.isClickable || foundNode.isCheckable) {
-                    Log.d(TAG, "Auto-acting on ID: $id")
-                    foundNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                    if (foundNode.isCheckable) continue 
-                }
-            }
-        }
+        // Android 14+ introduces a dropdown to choose between "A single app" and "Entire screen".
+        // We must ensure "Entire screen" is selected so the stream doesn't pause when minimized.
+        val entireScreenNodes = node.findAccessibilityNodeInfosByText("Entire screen")
+        val singleAppNodes = node.findAccessibilityNodeInfosByText("A single app")
 
-        // Try Text patterns
-        for (text in textToFind) {
-            val nodes = node.findAccessibilityNodeInfosByText(text)
-            for (foundNode in nodes) {
+        if (entireScreenNodes.isNotEmpty() && singleAppNodes.isNotEmpty()) {
+            // Popup is open! Both options are visible. Click "Entire screen".
+            for (foundNode in entireScreenNodes) {
                 if (foundNode.isClickable) {
-                    Log.d(TAG, "Auto-clicking text: $text")
+                    Log.d(TAG, "Auto-clicking Entire screen from dropdown")
                     foundNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    lastProjectionClickTime = System.currentTimeMillis()
+                    return
+                } else if (foundNode.parent?.isClickable == true) {
+                    Log.d(TAG, "Auto-clicking Entire screen (parent) from dropdown")
+                    foundNode.parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    lastProjectionClickTime = System.currentTimeMillis()
+                    return
                 }
             }
-        }
+        } else if (singleAppNodes.isNotEmpty() && entireScreenNodes.isEmpty()) {
+            // Main dialog with "A single app" selected. Click it to open the popup.
+            for (foundNode in singleAppNodes) {
+                if (foundNode.isClickable) {
+                    Log.d(TAG, "Auto-clicking A single app to open dropdown")
+                    foundNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    lastProjectionClickTime = System.currentTimeMillis()
+                    return
+                } else if (foundNode.parent?.isClickable == true) {
+                    Log.d(TAG, "Auto-clicking A single app (parent) to open dropdown")
+                    foundNode.parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    lastProjectionClickTime = System.currentTimeMillis()
+                    return
+                }
+            }
+        } else {
+            // Either "Entire screen" is selected, or this is an older Android version.
+            // Click "Start now" or "Allow".
+            val textToFind = listOf("Start now", "Allow", "Start recording", "START NOW", "ALLOW")
+            val idsToFind = listOf(
+                "android:id/button1",
+                "com.android.systemui:id/remember_checkbox",
+                "com.android.systemui:id/button_start_now",
+                "com.android.systemui:id/start_button"
+            )
 
-        // 2. Recursive search for children
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i)
-            findAndClickMediaProjectionButtons(child)
+            // Try IDs first
+            for (id in idsToFind) {
+                val nodes = node.findAccessibilityNodeInfosByViewId(id)
+                for (foundNode in nodes) {
+                    if (foundNode.isClickable || foundNode.isCheckable) {
+                        Log.d(TAG, "Auto-acting on ID: $id")
+                        foundNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        if (foundNode.isCheckable) continue 
+                        lastProjectionClickTime = System.currentTimeMillis()
+                        return
+                    }
+                }
+            }
+
+            // Try Text
+            for (text in textToFind) {
+                val nodes = node.findAccessibilityNodeInfosByText(text)
+                for (foundNode in nodes) {
+                    if (foundNode.isClickable) {
+                        Log.d(TAG, "Auto-acting on Text: $text")
+                        foundNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        lastProjectionClickTime = System.currentTimeMillis()
+                        return
+                    }
+                }
+            }
         }
     }
 
