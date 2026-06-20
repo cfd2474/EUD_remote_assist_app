@@ -32,7 +32,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.layout.ContentScale
@@ -41,10 +40,6 @@ import com.cfd2474.eudremoteassist.network.NetworkManager
 import com.cfd2474.eudremoteassist.service.DeviceGatewayService
 import com.cfd2474.eudremoteassist.service.RemoteAssistAccessibilityService
 import com.cfd2474.eudremoteassist.service.ScreenShareService
-
-enum class AppScreen {
-    MAIN, CONFIG
-}
 
 class MainActivity : ComponentActivity() {
 
@@ -107,10 +102,13 @@ class MainActivity : ComponentActivity() {
             if (qrText != null) {
                 try {
                     val json = org.json.JSONObject(qrText)
-                    val serverUrl = json.optString("server_url", "")
-                    val token = json.optString("token", "")
-                    val tlsPin = json.optString("tls_pin", "")
+                    val serverUrl = json.optString("tracking_server_url", json.optString("server_url", ""))
+                    val token = json.optString("enrollment_token", json.optString("token", ""))
+                    val tlsPin = json.optString("tls_pin_hash", json.optString("tls_pin", ""))
                     
+                    Log.i(TAG, "QR Parsed: serverUrl='$serverUrl', token='$token', tlsPin='$tlsPin'")
+                    Log.i(TAG, "QR Raw Text: $qrText")
+
                     if (serverUrl.isNotEmpty()) {
                         val formattedUrl = config.formatServerUrl(serverUrl)
                         config.setTrackingServerUrl(formattedUrl)
@@ -126,10 +124,10 @@ class MainActivity : ComponentActivity() {
                             registerDeviceFlow(this)
                         }
                     } else {
-                        Toast.makeText(this, "Invalid QR code format", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "Invalid QR code format: $qrText", Toast.LENGTH_LONG).show()
                     }
                 } catch (e: Exception) {
-                    Toast.makeText(this, "Failed to parse QR code", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Failed to parse QR code: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -247,7 +245,8 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.READ_PHONE_NUMBERS,
-            Manifest.permission.CALL_PHONE
+            Manifest.permission.CALL_PHONE,
+            Manifest.permission.CAMERA
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
@@ -263,7 +262,8 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.READ_PHONE_NUMBERS,
-            Manifest.permission.CALL_PHONE
+            Manifest.permission.CALL_PHONE,
+            Manifest.permission.CAMERA
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
@@ -294,12 +294,6 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun MainScreen() {
         val context = LocalContext.current
-        var currentScreen by remember { mutableStateOf(AppScreen.MAIN) }
-        var serverUrl by remember { mutableStateOf(config.getTrackingServerUrl()) }
-        var agency by remember { mutableStateOf(config.getAgency()) }
-        val isMdmManaged = config.isMdmManaged()
-        val isServerMdmManaged = config.isServerMdmManaged()
-        val isAgencyMdmManaged = config.isAgencyMdmManaged()
         val isRegistered = isRegisteredState.value
         val isAdminActive = isAdminActiveState.value
         val isAccessibilityActive = isAccessibilityActiveState.value
@@ -310,13 +304,10 @@ class MainActivity : ComponentActivity() {
 
         var isWebsocketConnected by remember { mutableStateOf(networkManager.isWebSocketConnected()) }
 
-        var showCreatePasswordDialog by remember { mutableStateOf(false) }
-        var showEnterPasswordDialog by remember { mutableStateOf(false) }
-        var showChangePasswordDialog by remember { mutableStateOf(false) }
-        var showMdmPasswordNoticeDialog by remember { mutableStateOf(false) }
         var showAccessibilitySetupDialog by remember { mutableStateOf(false) }
         var showRestrictedSettingsDialog by remember { mutableStateOf(false) }
         var showMissingPermissionsDialog by remember { mutableStateOf(false) }
+        var showMdmOverrideDialog by remember { mutableStateOf(false) }
 
         var timeSinceLastHeartbeat by remember { mutableStateOf("N/A") }
 
@@ -335,219 +326,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Create Settings Password Dialog
-        if (showCreatePasswordDialog) {
-            var newPassword by remember { mutableStateOf("") }
-            var confirmPassword by remember { mutableStateOf("") }
-            var errorMsg by remember { mutableStateOf("") }
 
-            AlertDialog(
-                onDismissRequest = { showCreatePasswordDialog = false },
-                title = { Text("Set Settings Password", color = Color.White, fontWeight = FontWeight.Bold) },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Create a password to secure portal configurations.", color = Color.LightGray, fontSize = 14.sp)
-                        OutlinedTextField(
-                            value = newPassword,
-                            onValueChange = { newPassword = it },
-                            label = { Text("Password", color = Color(0xFF38BDF8)) },
-                            singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF38BDF8),
-                                unfocusedBorderColor = Color(0xFF475569)
-                            )
-                        )
-                        OutlinedTextField(
-                            value = confirmPassword,
-                            onValueChange = { confirmPassword = it },
-                            label = { Text("Confirm Password", color = Color(0xFF38BDF8)) },
-                            singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF38BDF8),
-                                unfocusedBorderColor = Color(0xFF475569)
-                            )
-                        )
-                        if (errorMsg.isNotEmpty()) {
-                            Text(errorMsg, color = Color.Red, fontSize = 13.sp)
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            if (newPassword.isBlank()) {
-                                errorMsg = "Password cannot be blank"
-                            } else if (newPassword != confirmPassword) {
-                                errorMsg = "Passwords do not match"
-                            } else {
-                                config.setSettingsPassword(newPassword)
-                                showCreatePasswordDialog = false
-                                currentScreen = AppScreen.CONFIG
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
-                    ) {
-                        Text("Save & Enter", color = Color.White)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showCreatePasswordDialog = false }) {
-                        Text("Cancel", color = Color.Gray)
-                    }
-                },
-                containerColor = Color(0xFF1E293B)
-            )
-        }
-
-        // Enter Settings Password Dialog
-        if (showEnterPasswordDialog) {
-            var passwordInput by remember { mutableStateOf("") }
-            var errorMsg by remember { mutableStateOf("") }
-
-            AlertDialog(
-                onDismissRequest = { showEnterPasswordDialog = false },
-                title = { Text("Enter Settings Password", color = Color.White, fontWeight = FontWeight.Bold) },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Enter the password to access configurations.", color = Color.LightGray, fontSize = 14.sp)
-                        OutlinedTextField(
-                            value = passwordInput,
-                            onValueChange = { passwordInput = it },
-                            label = { Text("Password", color = Color(0xFF38BDF8)) },
-                            singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF38BDF8),
-                                unfocusedBorderColor = Color(0xFF475569)
-                            )
-                        )
-                        if (errorMsg.isNotEmpty()) {
-                            Text(errorMsg, color = Color.Red, fontSize = 13.sp)
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            val saved = config.getSettingsPassword()
-                            if (passwordInput == saved) {
-                                showEnterPasswordDialog = false
-                                currentScreen = AppScreen.CONFIG
-                            } else {
-                                errorMsg = "Incorrect password"
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
-                    ) {
-                        Text("Unlock", color = Color.White)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showEnterPasswordDialog = false }) {
-                        Text("Cancel", color = Color.Gray)
-                    }
-                },
-                containerColor = Color(0xFF1E293B)
-            )
-        }
-
-        // Change Settings Password Dialog
-        if (showChangePasswordDialog) {
-            var newPassword by remember { mutableStateOf("") }
-            var confirmPassword by remember { mutableStateOf("") }
-            var errorMsg by remember { mutableStateOf("") }
-
-            AlertDialog(
-                onDismissRequest = { showChangePasswordDialog = false },
-                title = { Text("Change Settings Password", color = Color.White, fontWeight = FontWeight.Bold) },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Enter a new password to secure configurations.", color = Color.LightGray, fontSize = 14.sp)
-                        OutlinedTextField(
-                            value = newPassword,
-                            onValueChange = { newPassword = it },
-                            label = { Text("New Password", color = Color(0xFF38BDF8)) },
-                            singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF38BDF8),
-                                unfocusedBorderColor = Color(0xFF475569)
-                            )
-                        )
-                        OutlinedTextField(
-                            value = confirmPassword,
-                            onValueChange = { confirmPassword = it },
-                            label = { Text("Confirm New Password", color = Color(0xFF38BDF8)) },
-                            singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF38BDF8),
-                                unfocusedBorderColor = Color(0xFF475569)
-                            )
-                        )
-                        if (errorMsg.isNotEmpty()) {
-                            Text(errorMsg, color = Color.Red, fontSize = 13.sp)
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            if (newPassword.isBlank()) {
-                                errorMsg = "Password cannot be blank"
-                            } else if (newPassword != confirmPassword) {
-                                errorMsg = "Passwords do not match"
-                            } else {
-                                config.setSettingsPassword(newPassword)
-                                showChangePasswordDialog = false
-                                Toast.makeText(context, "Password updated successfully", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
-                    ) {
-                        Text("Change", color = Color.White)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showChangePasswordDialog = false }) {
-                        Text("Cancel", color = Color.Gray)
-                    }
-                },
-                containerColor = Color(0xFF1E293B)
-            )
-        }
-
-        // MDM Managed Password Notice Dialog
-        if (showMdmPasswordNoticeDialog) {
-            AlertDialog(
-                onDismissRequest = { showMdmPasswordNoticeDialog = false },
-                title = { Text("Managed Password", color = Color.White, fontWeight = FontWeight.Bold) },
-                text = {
-                    Text("Password is set by MDM and is not changeable. Contact administrator.", color = Color.LightGray)
-                },
-                confirmButton = {
-                    Button(
-                        onClick = { showMdmPasswordNoticeDialog = false },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
-                    ) {
-                        Text("OK", color = Color.White)
-                    }
-                },
-                containerColor = Color(0xFF1E293B)
-            )
-        }
 
         // Remote Control Setup Dialog
         if (showAccessibilitySetupDialog) {
@@ -648,7 +427,6 @@ class MainActivity : ComponentActivity() {
                     Button(
                         onClick = {
                             showMissingPermissionsDialog = false
-                            currentScreen = AppScreen.MAIN
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
                     ) {
@@ -664,8 +442,6 @@ class MainActivity : ComponentActivity() {
             )
         }
 
-        when (currentScreen) {
-            AppScreen.MAIN -> {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -970,291 +746,84 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        // Portal Configurations access button
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B))
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Text(
-                                    text = "System Administration",
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    fontSize = 16.sp
+                        val mdmManaged = config.isMdmManaged()
+
+                        if (mdmManaged) {
+                            Button(
+                                onClick = {
+                                    config.setMdmOverride(false)
+                                    registerDeviceFlow(context)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF0284C7) // Sky 600
                                 )
-                                HorizontalDivider(color = Color(0xFF334155))
-                                Button(
-                                    onClick = {
-                                        val pwd = config.getSettingsPassword()
-                                        if (pwd.isNullOrBlank()) {
-                                            showCreatePasswordDialog = true
-                                        } else {
-                                            showEnterPasswordDialog = true
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(8.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
-                                ) {
-                                    Text("Portal Configurations", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            ) {
+                                Text("MDM Register", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+
+                        Button(
+                            onClick = {
+                                if (mdmManaged && !config.isMdmOverridden()) {
+                                    showMdmOverrideDialog = true
+                                } else {
+                                    config.setMdmOverride(true)
+                                    val intent = android.content.Intent(context, com.cfd2474.eudremoteassist.QrScannerActivity::class.java)
+                                    qrScannerLauncher.launch(intent)
                                 }
-                            }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF10B981) // Emerald 500
+                            )
+                        ) {
+                            Text("Scan QR to Enroll", color = Color.White, fontWeight = FontWeight.SemiBold)
                         }
 
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Text(
-                            text = "v${BuildInfo.VERSION_NAME}",
-                            color = Color.Gray.copy(alpha = 0.6f),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Spacer(modifier = Modifier.height(24.dp))
-                    }
-                }
-            }
+                        // MDM Override Dialog
+                        if (showMdmOverrideDialog) {
+                            var showOverrideButton by remember { mutableStateOf(false) }
 
-            AppScreen.CONFIG -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color(0xFF0F172A), // Slate 900
-                                    Color(0xFF1E293B)  // Slate 800
-                                )
-                            )
-                        )
-                        .padding(24.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(androidx.compose.foundation.rememberScrollState()),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(20.dp)
-                    ) {
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // Header with Back Button
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            TextButton(onClick = {
-                                val formattedUrl = config.formatServerUrl(serverUrl)
-                                config.setTrackingServerUrl(formattedUrl)
-                                config.setAgency(agency)
-                                serverUrl = formattedUrl
-                                currentScreen = AppScreen.MAIN
-                            }) {
-                                Text("← Back", color = Color(0xFF38BDF8), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            LaunchedEffect(showMdmOverrideDialog) {
+                                showOverrideButton = false
+                                kotlinx.coroutines.delay(30000)
+                                showOverrideButton = true
                             }
-                            Text(
-                                text = "Portal Config",
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    fontFamily = FontFamily.SansSerif
-                                )
-                            )
-                            Spacer(modifier = Modifier.width(60.dp)) // balancing space
-                        }
 
-                        // Configuration Card
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B))
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(16.dp)
-                            ) {
-                                Text(
-                                    text = "Connection Settings",
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    fontSize = 16.sp
-                                )
-
-                                if (isMdmManaged) {
-                                    Badge(containerColor = Color(0xFF0369A1)) {
-                                        Text(
-                                            text = "MDM Managed",
-                                            color = Color.White,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                        )
+                            AlertDialog(
+                                onDismissRequest = { showMdmOverrideDialog = false },
+                                title = { Text("MDM Managed Device", color = Color.White, fontWeight = FontWeight.Bold) },
+                                text = {
+                                    Text("This device is currently configured using MDM values.", color = Color.LightGray)
+                                },
+                                confirmButton = {
+                                    if (showOverrideButton) {
+                                        Button(
+                                            onClick = {
+                                                showMdmOverrideDialog = false
+                                                config.setMdmOverride(true)
+                                                val intent = android.content.Intent(context, com.cfd2474.eudremoteassist.QrScannerActivity::class.java)
+                                                qrScannerLauncher.launch(intent)
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+                                        ) {
+                                            Text("Continue to QR Registration", color = Color.White)
+                                        }
                                     }
-                                }
-
-                                HorizontalDivider(color = Color(0xFF334155))
-
-                                OutlinedTextField(
-                                    value = serverUrl,
-                                    onValueChange = {
-                                        if (!isServerMdmManaged) {
-                                            serverUrl = it
-                                        }
-                                    },
-                                    label = { Text("Server Base URL", color = Color(0xFF38BDF8)) },
-                                    placeholder = { Text("example.com or xxx.xxx.xx.xx", color = Color.Gray) },
-                                    enabled = !isServerMdmManaged,
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = Color(0xFF38BDF8),
-                                        unfocusedBorderColor = Color(0xFF475569),
-                                        disabledBorderColor = Color(0xFF334155),
-                                        disabledTextColor = Color.Gray,
-                                        focusedTextColor = Color.White,
-                                        unfocusedTextColor = Color.White
-                                    )
-                                )
-
-                                OutlinedTextField(
-                                    value = agency,
-                                    onValueChange = {
-                                        if (!isAgencyMdmManaged) {
-                                            agency = it
-                                        }
-                                    },
-                                    label = { Text("Agency", color = Color(0xFF38BDF8)) },
-                                    placeholder = { Text("eg. NYPD, LAFD", color = Color.Gray) },
-                                    enabled = !isAgencyMdmManaged,
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = Color(0xFF38BDF8),
-                                        unfocusedBorderColor = Color(0xFF475569),
-                                        disabledBorderColor = Color(0xFF334155),
-                                        disabledTextColor = Color.Gray,
-                                        focusedTextColor = Color.White,
-                                        unfocusedTextColor = Color.White
-                                    )
-                                )
-
-                                Button(
-                                    onClick = {
-                                        val formattedUrl = config.formatServerUrl(serverUrl)
-                                        config.setTrackingServerUrl(formattedUrl)
-                                        config.setAgency(agency)
-                                        serverUrl = formattedUrl
-                                        Toast.makeText(context, "Configuration saved", Toast.LENGTH_SHORT).show()
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(8.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFF0EA5E9) // Sky 500
-                                    )
-                                ) {
-                                    Text("Save Configuration", color = Color.White, fontWeight = FontWeight.SemiBold)
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                 val allPermissionsGranted = missingPermissions.isEmpty() &&
-                                         isAccessibilityActive &&
-                                         isOverlayActive &&
-                                         isBatteryIgnoring &&
-                                         isAdminActive &&
-                                         isBootStartEnabled
-
-                                 if (!allPermissionsGranted) {
-                                     val missingList = mutableListOf<String>()
-                                     if (missingPermissions.isNotEmpty()) missingList.add("Basic")
-                                     if (!isAccessibilityActive) missingList.add("Remote Control")
-                                     if (!isOverlayActive) missingList.add("System Overlays")
-                                     if (!isBatteryIgnoring) missingList.add("Battery Optimization")
-                                     if (!isAdminActive) missingList.add("Device Administrator")
-                                     if (!isBootStartEnabled) missingList.add("Launch on Reboot")
-
-                                     Card(
-                                         colors = CardDefaults.cardColors(containerColor = Color(0xFF451A1A)),
-                                         shape = RoundedCornerShape(8.dp),
-                                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-                                     ) {
-                                         Column(modifier = Modifier.padding(12.dp)) {
-                                             Text(
-                                                 text = "Cannot Register: Missing permissions",
-                                                 color = Color(0xFFF87171),
-                                                 fontWeight = FontWeight.Bold,
-                                                 fontSize = 14.sp
-                                             )
-                                             Spacer(modifier = Modifier.height(4.dp))
-                                             Text(
-                                                 text = "Please enable: ${missingList.joinToString(", ")}",
-                                                 color = Color(0xFFFCA5A5),
-                                                 fontSize = 13.sp
-                                             )
-                                         }
-                                     }
-                                 }
-
-                                 Spacer(modifier = Modifier.height(8.dp))
-
-                                 Button(
-                                     onClick = {
-                                         val formattedUrl = config.formatServerUrl(serverUrl)
-                                         config.setTrackingServerUrl(formattedUrl)
-                                         config.setAgency(agency)
-                                         serverUrl = formattedUrl
-                                         if (!allPermissionsGranted) {
-                                             showMissingPermissionsDialog = true
-                                         } else {
-                                             registerDeviceFlow(context)
-                                         }
-                                     },
-                                     modifier = Modifier.fillMaxWidth(),
-                                     shape = RoundedCornerShape(8.dp),
-                                     colors = ButtonDefaults.buttonColors(
-                                         containerColor = Color(0xFF0284C7) // Sky 600
-                                     )
-                                 ) {
-                                 }
-
-                                 Spacer(modifier = Modifier.height(8.dp))
-
-                                 Button(
-                                     onClick = {
-                                         val intent = Intent(context, QrScannerActivity::class.java)
-                                         qrScannerLauncher.launch(intent)
-                                     },
-                                     modifier = Modifier.fillMaxWidth(),
-                                     shape = RoundedCornerShape(8.dp),
-                                     colors = ButtonDefaults.buttonColors(
-                                         containerColor = Color(0xFF10B981) // Emerald 500
-                                     )
-                                 ) {
-                                     Text("Scan QR to Enroll", color = Color.White, fontWeight = FontWeight.SemiBold)
-                                 }
-
-                                 Spacer(modifier = Modifier.height(8.dp))
-
-                                 Button(
-                                     onClick = {
-                                         if (config.isPasswordMdmManaged()) {
-                                             showMdmPasswordNoticeDialog = true
-                                         } else {
-                                             showChangePasswordDialog = true
-                                         }
-                                     },
-                                     modifier = Modifier.fillMaxWidth(),
-                                     shape = RoundedCornerShape(8.dp),
-                                     colors = ButtonDefaults.buttonColors(
-                                         containerColor = Color(0xFF475569) // Slate 600
-                                     )
-                                 ) {
-                                     Text("Change Settings Password", color = Color.White, fontWeight = FontWeight.SemiBold)
-                                 }
-                            }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showMdmOverrideDialog = false }) {
+                                        Text("Dismiss", color = Color.Gray)
+                                    }
+                                },
+                                containerColor = Color(0xFF1E293B)
+                            )
                         }
+
                         Spacer(modifier = Modifier.height(24.dp))
                         Text(
                             text = "v${BuildInfo.VERSION_NAME}",
@@ -1267,8 +836,6 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-        }
-    }
 
     @Composable
     fun InfoRow(label: String, value: String, valueColor: Color = Color.LightGray) {

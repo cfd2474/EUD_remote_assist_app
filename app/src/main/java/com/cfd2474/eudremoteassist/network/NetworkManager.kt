@@ -231,8 +231,12 @@ class NetworkManager private constructor(
             val token = config.getEnrollmentToken()
             if (!token.isNullOrBlank()) {
                 addProperty("enrollment_token", token)
+            } else {
+                Log.w(TAG, "registerDevice: getEnrollmentToken() returned null or blank! mdmOverridden=${config.isMdmOverridden()}")
             }
         }
+
+        Log.i(TAG, "registerDevice JSON Body: $bodyJson")
 
         val request = Request.Builder()
             .url(url)

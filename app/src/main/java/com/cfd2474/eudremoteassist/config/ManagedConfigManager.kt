@@ -8,41 +8,65 @@ import androidx.security.crypto.MasterKey
 
 class ManagedConfigManager(private val context: Context) {
 
-    private val sharedPrefs by lazy {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        
-        val encryptedPrefs = EncryptedSharedPreferences.create(
-            context,
-            "eud_remote_assist_prefs_enc",
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-        
-        val oldPrefs = context.getSharedPreferences("eud_remote_assist_prefs", Context.MODE_PRIVATE)
-        if (oldPrefs.all.isNotEmpty()) {
-            val editor = encryptedPrefs.edit()
-            oldPrefs.all.forEach { (key, value) ->
-                when (value) {
-                    is String -> editor.putString(key, value)
-                    is Int -> editor.putInt(key, value)
-                    is Boolean -> editor.putBoolean(key, value)
-                    is Float -> editor.putFloat(key, value)
-                    is Long -> editor.putLong(key, value)
-                }
+    companion object {
+        @Volatile
+        private var sharedPrefsInstance: android.content.SharedPreferences? = null
+
+        fun getPrefs(context: Context): android.content.SharedPreferences {
+            return sharedPrefsInstance ?: synchronized(this) {
+                sharedPrefsInstance ?: createPrefs(context).also { sharedPrefsInstance = it }
             }
-            editor.apply()
-            oldPrefs.edit().clear().apply()
         }
-        
-        encryptedPrefs
+
+        private fun createPrefs(context: Context): android.content.SharedPreferences {
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            
+            val encryptedPrefs = EncryptedSharedPreferences.create(
+                context,
+                "eud_remote_assist_prefs_enc",
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+            
+            val oldPrefs = context.getSharedPreferences("eud_remote_assist_prefs", Context.MODE_PRIVATE)
+            if (oldPrefs.all.isNotEmpty()) {
+                val editor = encryptedPrefs.edit()
+                oldPrefs.all.forEach { (key, value) ->
+                    when (value) {
+                        is String -> editor.putString(key, value)
+                        is Int -> editor.putInt(key, value)
+                        is Boolean -> editor.putBoolean(key, value)
+                        is Float -> editor.putFloat(key, value)
+                        is Long -> editor.putLong(key, value)
+                    }
+                }
+                editor.commit()
+                oldPrefs.edit().clear().commit()
+            }
+            return encryptedPrefs
+        }
     }
+
+    private val sharedPrefs: android.content.SharedPreferences
+        get() = getPrefs(context)
     
     private val restrictionsManager = context.getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
 
+    fun isMdmOverridden(): Boolean {
+        return sharedPrefs.getBoolean("mdm_overridden", false)
+    }
+
+    fun setMdmOverride(override: Boolean) {
+        sharedPrefs.edit().putBoolean("mdm_overridden", override).commit()
+    }
+
     fun getTrackingServerUrl(): String {
+        if (isMdmOverridden()) {
+            return sharedPrefs.getString("tracking_server_url", "")?.trimEnd('/') ?: ""
+        }
         val mdmUrl = getMdmString("tracking_server_url")
         val url = if (!mdmUrl.isNullOrBlank()) {
             mdmUrl
@@ -53,10 +77,13 @@ class ManagedConfigManager(private val context: Context) {
     }
 
     fun setTrackingServerUrl(url: String) {
-        sharedPrefs.edit().putString("tracking_server_url", url).apply()
+        sharedPrefs.edit().putString("tracking_server_url", url).commit()
     }
 
     fun getTlsPinHash(): String? {
+        if (isMdmOverridden()) {
+            return sharedPrefs.getString("tls_pin_hash", null)
+        }
         val mdmPin = getMdmString("tls_pin_hash")
         if (!mdmPin.isNullOrBlank()) {
             return mdmPin
@@ -65,10 +92,13 @@ class ManagedConfigManager(private val context: Context) {
     }
 
     fun setTlsPinHash(hash: String) {
-        sharedPrefs.edit().putString("tls_pin_hash", hash).apply()
+        sharedPrefs.edit().putString("tls_pin_hash", hash).commit()
     }
 
     fun getEnrollmentToken(): String? {
+        if (isMdmOverridden()) {
+            return sharedPrefs.getString("enrollment_token", null)
+        }
         val mdmToken = getMdmString("enrollment_token")
         if (!mdmToken.isNullOrBlank()) {
             return mdmToken
@@ -77,7 +107,7 @@ class ManagedConfigManager(private val context: Context) {
     }
 
     fun setEnrollmentToken(token: String) {
-        sharedPrefs.edit().putString("enrollment_token", token).apply()
+        sharedPrefs.edit().putString("enrollment_token", token).commit()
     }
 
     fun formatServerUrl(input: String): String {
@@ -99,6 +129,9 @@ class ManagedConfigManager(private val context: Context) {
     }
 
     fun getConnectionSecret(): String? {
+        if (isMdmOverridden()) {
+            return sharedPrefs.getString("cached_connection_secret", null)
+        }
         val mdmSecret = getMdmString("connection_secret")
         if (!mdmSecret.isNullOrBlank()) {
             return mdmSecret
@@ -107,11 +140,11 @@ class ManagedConfigManager(private val context: Context) {
     }
 
     fun setConnectionSecret(secret: String) {
-        sharedPrefs.edit().putString("cached_connection_secret", secret).apply()
+        sharedPrefs.edit().putString("cached_connection_secret", secret).commit()
     }
 
     fun clearConnectionSecret() {
-        sharedPrefs.edit().remove("cached_connection_secret").apply()
+        sharedPrefs.edit().remove("cached_connection_secret").commit()
     }
 
     fun getTrackingInterval(): Int {
@@ -123,22 +156,13 @@ class ManagedConfigManager(private val context: Context) {
     }
 
     fun setTrackingInterval(minutes: Int) {
-        sharedPrefs.edit().putInt("tracking_interval", minutes).apply()
-    }
-
-    fun getSettingsPassword(): String? {
-        val mdmPassword = getMdmString("settings_password")
-        if (!mdmPassword.isNullOrBlank()) {
-            return mdmPassword
-        }
-        return sharedPrefs.getString("settings_password", null)
-    }
-
-    fun setSettingsPassword(password: String) {
-        sharedPrefs.edit().putString("settings_password", password).apply()
+        sharedPrefs.edit().putInt("tracking_interval", minutes).commit()
     }
 
     fun getAgency(): String {
+        if (isMdmOverridden()) {
+            return sharedPrefs.getString("agency", "") ?: ""
+        }
         val mdmAgency = getMdmString("agency")
         if (!mdmAgency.isNullOrBlank()) {
             return mdmAgency
@@ -147,7 +171,7 @@ class ManagedConfigManager(private val context: Context) {
     }
 
     fun setAgency(agency: String) {
-        sharedPrefs.edit().putString("agency", agency).apply()
+        sharedPrefs.edit().putString("agency", agency).commit()
     }
 
     fun isMdmManaged(): Boolean {
@@ -155,7 +179,6 @@ class ManagedConfigManager(private val context: Context) {
         return bundle != null && (
                 bundle.containsKey("tracking_server_url") ||
                 bundle.containsKey("agency") ||
-                bundle.containsKey("settings_password") ||
                 bundle.containsKey("tracking_interval")
         )
     }
@@ -170,10 +193,7 @@ class ManagedConfigManager(private val context: Context) {
         return bundle != null && bundle.containsKey("agency")
     }
 
-    fun isPasswordMdmManaged(): Boolean {
-        val bundle = restrictionsManager.applicationRestrictions
-        return bundle != null && bundle.containsKey("settings_password")
-    }
+
 
     fun isBootStartEnabled(): Boolean {
         return sharedPrefs.getBoolean("boot_start_enabled", true)

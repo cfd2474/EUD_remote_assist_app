@@ -82,12 +82,15 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
         // Check package names - Lock screen is in systemui
         val packageName = node.packageName?.toString() ?: ""
         if (packageName.contains("systemui") || packageName.contains("android") || packageName.isEmpty()) {
-            val metrics = resources.displayMetrics
+            val windowManager = getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+            val metrics = android.util.DisplayMetrics()
+            windowManager.defaultDisplay.getRealMetrics(metrics)
+            
             val middleX = metrics.widthPixels / 2f
             
             // Aggressive swipe: start very low, end very high
             val startY = metrics.heightPixels * 0.9f
-            val endY = metrics.heightPixels * 0.1f
+            val endY = metrics.heightPixels * 0.3f
             
             Log.d(TAG, "Lock screen detected while session active. Attempting aggressive swipe up.")
             
@@ -96,9 +99,9 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
                 lineTo(middleX, endY)
             }
             
-            // Duration matters: 200ms is a fast flick. 
+            // Duration matters: 300ms is a fast flick. 
             val gestureBuilder = GestureDescription.Builder()
-            gestureBuilder.addStroke(GestureDescription.StrokeDescription(swipePath, 0, 200))
+            gestureBuilder.addStroke(GestureDescription.StrokeDescription(swipePath, 0, 300))
             
             lastSwipeTime = System.currentTimeMillis()
 
@@ -119,17 +122,22 @@ class RemoteAssistAccessibilityService : AccessibilityService() {
         Log.i(TAG, "Initiating remote unlock sequence")
         
         // 1. Swipe up to reveal PIN pad
-        val metrics = resources.displayMetrics
+        val windowManager = getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+        val metrics = android.util.DisplayMetrics()
+        windowManager.defaultDisplay.getRealMetrics(metrics)
+        
         val middleX = metrics.widthPixels / 2f
-        val startY = metrics.heightPixels * 0.8f
-        val endY = metrics.heightPixels * 0.2f
+        val startY = metrics.heightPixels * 0.9f
+        val endY = metrics.heightPixels * 0.3f
+        
+        Log.d(TAG, "Unlocking: swiping from ($middleX, $startY) to ($middleX, $endY)")
         
         val swipePath = Path().apply {
             moveTo(middleX, startY)
             lineTo(middleX, endY)
         }
         val swipeGesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(swipePath, 0, 200))
+            .addStroke(GestureDescription.StrokeDescription(swipePath, 0, 300))
             .build()
             
         dispatchGesture(swipeGesture, object : GestureResultCallback() {

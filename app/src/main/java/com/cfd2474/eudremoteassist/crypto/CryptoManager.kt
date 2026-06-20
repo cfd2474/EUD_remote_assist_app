@@ -22,7 +22,7 @@ object CryptoManager {
                     KEY_ALIAS,
                     KeyProperties.PURPOSE_DECRYPT
                 )
-                    .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA512)
+                    .setDigests(KeyProperties.DIGEST_SHA256)
                     .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
                     .build()
             )
