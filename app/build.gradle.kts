@@ -19,7 +19,6 @@ val gitCommitHash = providers.exec {
 android {
     namespace = "com.cfd2474.eudremoteassist"
     compileSdk = 35
-    
     defaultConfig {
         applicationId = "com.cfd2474.eudremoteassist"
         minSdk = 26
