@@ -1,46 +1,67 @@
 package com.cfd2474.eudremoteassist.crypto
 
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
+import android.content.Context
 import android.util.Base64
+import com.cfd2474.eudremoteassist.config.ManagedConfigManager
+import java.security.KeyFactory
 import java.security.KeyPairGenerator
-import java.security.KeyStore
 import java.security.PrivateKey
+import java.security.spec.PKCS8EncodedKeySpec
 import javax.crypto.Cipher
+import javax.crypto.spec.OAEPParameterSpec
+import javax.crypto.spec.PSource
+import java.security.spec.MGF1ParameterSpec
 
 object CryptoManager {
-    private const val KEY_ALIAS = "eud_remote_assist_e2ee_key"
+    private var cachedPublicKey: String? = null
+    private var cachedPrivateKey: PrivateKey? = null
 
-    fun getOrGeneratePublicKey(): String {
-        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        if (!keyStore.containsAlias(KEY_ALIAS)) {
-            val keyPairGenerator = KeyPairGenerator.getInstance(
-                KeyProperties.KEY_ALGORITHM_RSA, "AndroidKeyStore"
-            )
-            keyPairGenerator.initialize(
-                KeyGenParameterSpec.Builder(
-                    KEY_ALIAS,
-                    KeyProperties.PURPOSE_DECRYPT
-                )
-                    .setDigests(KeyProperties.DIGEST_SHA256)
-                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
-                    .build()
-            )
-            keyPairGenerator.generateKeyPair()
+    fun getOrGeneratePublicKey(context: Context): String {
+        cachedPublicKey?.let { return it }
+
+        val prefs = ManagedConfigManager.getPrefs(context)
+        val storedPublic = prefs.getString("e2ee_public_key", null)
+        val storedPrivate = prefs.getString("e2ee_private_key", null)
+
+        if (!storedPublic.isNullOrEmpty() && !storedPrivate.isNullOrEmpty()) {
+            cachedPublicKey = storedPublic
+            val privateKeyBytes = Base64.decode(storedPrivate, Base64.DEFAULT)
+            cachedPrivateKey = KeyFactory.getInstance("RSA").generatePrivate(PKCS8EncodedKeySpec(privateKeyBytes))
+            return storedPublic
         }
-        val publicKey = keyStore.getCertificate(KEY_ALIAS).publicKey
-        return Base64.encodeToString(publicKey.encoded, Base64.NO_WRAP)
+
+        // Generate software KeyPair
+        val keyPairGenerator = KeyPairGenerator.getInstance("RSA")
+        keyPairGenerator.initialize(2048)
+        val keyPair = keyPairGenerator.generateKeyPair()
+
+        val publicKeyBase64 = Base64.encodeToString(keyPair.public.encoded, Base64.NO_WRAP)
+        val privateKeyBase64 = Base64.encodeToString(keyPair.private.encoded, Base64.NO_WRAP)
+
+        prefs.edit().putString("e2ee_public_key", publicKeyBase64).commit()
+        prefs.edit().putString("e2ee_private_key", privateKeyBase64).commit()
+
+        cachedPublicKey = publicKeyBase64
+        cachedPrivateKey = keyPair.private
+        return publicKeyBase64
     }
 
-    fun decryptPayload(encryptedBase64: String): String {
-        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        val privateKey = keyStore.getKey(KEY_ALIAS, null) as PrivateKey
-        
-        val cipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding")
-        cipher.init(Cipher.DECRYPT_MODE, privateKey)
-        
+    fun decryptPayload(context: Context, encryptedBase64: String): String {
+        getOrGeneratePublicKey(context) // Ensure keys are loaded
+        val privateKey = cachedPrivateKey ?: throw IllegalStateException("Private key not found")
+
+        val cipher = Cipher.getInstance("RSA/ECB/OAEPPadding")
+        val spec = OAEPParameterSpec(
+            "SHA-256",
+            "MGF1",
+            MGF1ParameterSpec.SHA256,
+            PSource.PSpecified.DEFAULT
+        )
+        cipher.init(Cipher.DECRYPT_MODE, privateKey, spec)
+
         val encryptedBytes = Base64.decode(encryptedBase64, Base64.DEFAULT)
         val decryptedBytes = cipher.doFinal(encryptedBytes)
         return String(decryptedBytes, Charsets.UTF_8)
     }
 }
+

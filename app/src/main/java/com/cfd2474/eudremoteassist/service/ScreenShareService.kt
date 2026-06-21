@@ -230,8 +230,6 @@ class ScreenShareService : Service() {
                         pipeline?.getLocalVideoTrack()
                     }
 
-                    sessionManager?.createPeerConnection()
-
                     val factory = sessionManager!!.getFactory()
                     
                     pipeline = ScreenCapturePipeline(this, factory, resultData, sessionManager?.getEglContext()) {
@@ -239,6 +237,7 @@ class ScreenShareService : Service() {
                     }
                     
                     pipeline?.start()
+                    sessionManager?.createPeerConnection()
 
                     // Start polling signaling Fallback
                     handler.post(pollRunnable)

@@ -767,6 +767,26 @@ class MainActivity : ComponentActivity() {
 
                         Button(
                             onClick = {
+                                config.clearConnectionSecret()
+                                config.setEnrollmentToken("")
+                                config.setTrackingServerUrl("")
+                                Toast.makeText(context, "Registration tokens cleared.", Toast.LENGTH_SHORT).show()
+                                isRegisteredState.value = false
+                                networkManager.disconnectWebSocket()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFEF4444) // Red 500
+                            )
+                        ) {
+                            Text("Clear Registration Data", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        }
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Button(
+                            onClick = {
                                 if (mdmManaged && !config.isMdmOverridden()) {
                                     showMdmOverrideDialog = true
                                 } else {

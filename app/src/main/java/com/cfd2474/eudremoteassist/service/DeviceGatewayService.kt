@@ -448,7 +448,7 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
                 val encryptedPin = json.get("pin")?.asString
                 if (!encryptedPin.isNullOrEmpty()) {
                     try {
-                        val pin = com.cfd2474.eudremoteassist.crypto.CryptoManager.decryptPayload(encryptedPin)
+                        val pin = com.cfd2474.eudremoteassist.crypto.CryptoManager.decryptPayload(this, encryptedPin)
                         wakeDevice()
                         val accessibilityService = RemoteAssistAccessibilityService.instance
                         if (accessibilityService != null) {
