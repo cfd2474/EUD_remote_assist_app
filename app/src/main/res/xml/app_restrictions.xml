@@ -6,7 +6,15 @@
         android:restrictionType="string" />
     <restriction
         android:key="connection_secret"
-        android:title="Connection Secret"
+        android:title="Connection Secret (Deprecated)"
+        android:restrictionType="string" />
+    <restriction
+        android:key="enrollment_token"
+        android:title="Enrollment Token"
+        android:restrictionType="string" />
+    <restriction
+        android:key="tls_pin_hash"
+        android:title="TLS Pin Hash"
         android:restrictionType="string" />
     <restriction
         android:key="tracking_interval"
