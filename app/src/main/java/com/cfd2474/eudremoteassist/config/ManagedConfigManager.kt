@@ -110,6 +110,18 @@ class ManagedConfigManager(private val context: Context) {
         sharedPrefs.edit().putString("enrollment_token", token).commit()
     }
 
+    fun clearEnrollmentToken() {
+        sharedPrefs.edit().remove("enrollment_token").commit()
+    }
+
+    fun getCachedDeviceUid(): String? {
+        return sharedPrefs.getString("cached_device_uid", null)
+    }
+
+    fun setCachedDeviceUid(uid: String) {
+        sharedPrefs.edit().putString("cached_device_uid", uid).commit()
+    }
+
     fun formatServerUrl(input: String): String {
         val url = input.trim()
         if (url.isEmpty()) return ""

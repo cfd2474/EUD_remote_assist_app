@@ -111,19 +111,27 @@ class NetworkManager private constructor(
     }
 
     fun getDeviceUid(): String {
+        // Return cached UID if we have it
+        val cachedUid = config.getCachedDeviceUid()
+        if (!cachedUid.isNullOrBlank()) {
+            return cachedUid
+        }
+
+        var newUid = "unknown_uid"
+
         // 1. Try Build.getSerial() (requires READ_PHONE_STATE, works on Android 9 and below or Android 10+ if Device Owner)
         try {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 @Suppress("MissingPermission")
                 val serial = android.os.Build.getSerial()
                 if (!serial.isNullOrBlank() && serial != android.os.Build.UNKNOWN) {
-                    return "serial_$serial"
+                    newUid = "serial_$serial"
                 }
             } else {
                 @Suppress("DEPRECATION")
                 val serial = android.os.Build.SERIAL
                 if (!serial.isNullOrBlank() && serial != android.os.Build.UNKNOWN) {
-                    return "serial_$serial"
+                    newUid = "serial_$serial"
                 }
             }
         } catch (e: SecurityException) {
@@ -133,49 +141,60 @@ class NetworkManager private constructor(
         }
 
         // 2. Try TelephonyManager IMEI/MEID (requires READ_PHONE_STATE, works if Device Owner or on older Android versions)
-        try {
-            val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as? android.telephony.TelephonyManager
-            if (telephonyManager != null) {
-                @Suppress("MissingPermission")
-                val imei = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    telephonyManager.imei ?: telephonyManager.meid
-                } else {
-                    @Suppress("DEPRECATION")
-                    telephonyManager.deviceId
+        if (newUid == "unknown_uid") {
+            try {
+                val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as? android.telephony.TelephonyManager
+                if (telephonyManager != null) {
+                    @Suppress("MissingPermission")
+                    val imei = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        telephonyManager.imei ?: telephonyManager.meid
+                    } else {
+                        @Suppress("DEPRECATION")
+                        telephonyManager.deviceId
+                    }
+                    if (!imei.isNullOrBlank() && imei != "unknown") {
+                        newUid = "imei_$imei"
+                    }
                 }
-                if (!imei.isNullOrBlank() && imei != "unknown") {
-                    return "imei_$imei"
-                }
+            } catch (e: SecurityException) {
+                Log.d(TAG, "TelephonyManager getImei() SecurityException: ${e.message}")
+            } catch (e: Exception) {
+                Log.d(TAG, "TelephonyManager error: ${e.message}")
             }
-        } catch (e: SecurityException) {
-            Log.d(TAG, "TelephonyManager getImei() SecurityException: ${e.message}")
-        } catch (e: Exception) {
-            Log.d(TAG, "TelephonyManager error: ${e.message}")
         }
 
         // 3. Try Widevine MediaDrm ID (reliable hardware-backed identifier across reinstallation/signing keys, no permission needed)
-        try {
-            val widevineUuid = java.util.UUID.fromString("ed90f895-d5cd-45d8-a341-5d40a2d14747")
-            val mediaDrm = android.media.MediaDrm(widevineUuid)
-            val widevineId = mediaDrm.getPropertyByteArray(android.media.MediaDrm.PROPERTY_DEVICE_UNIQUE_ID)
-            mediaDrm.close()
-            if (widevineId != null && widevineId.isNotEmpty()) {
-                val hexString = widevineId.joinToString("") { String.format("%02x", it) }
-                if (hexString.isNotBlank()) {
-                    return "wv_$hexString"
+        if (newUid == "unknown_uid") {
+            try {
+                val widevineUuid = java.util.UUID.fromString("ed90f895-d5cd-45d8-a341-5d40a2d14747")
+                val mediaDrm = android.media.MediaDrm(widevineUuid)
+                val widevineId = mediaDrm.getPropertyByteArray(android.media.MediaDrm.PROPERTY_DEVICE_UNIQUE_ID)
+                mediaDrm.close()
+                if (widevineId != null && widevineId.isNotEmpty()) {
+                    val hexString = widevineId.joinToString("") { String.format("%02x", it) }
+                    if (hexString.isNotBlank()) {
+                        newUid = "wv_$hexString"
+                    }
                 }
+            } catch (e: Exception) {
+                Log.d(TAG, "Widevine DRM unique ID error: ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.d(TAG, "Widevine DRM unique ID error: ${e.message}")
         }
 
         // 4. Fallback to Settings.Secure.ANDROID_ID
-        val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
-        if (!androidId.isNullOrBlank()) {
-            return androidId
+        if (newUid == "unknown_uid") {
+            val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+            if (!androidId.isNullOrBlank()) {
+                newUid = androidId
+            }
         }
 
-        return "unknown_uid"
+        // Cache the newly acquired UID so it never randomly changes again
+        if (newUid != "unknown_uid") {
+            config.setCachedDeviceUid(newUid)
+        }
+        
+        return newUid
     }
 
     @Suppress("MissingPermission")
@@ -226,7 +245,7 @@ class NetworkManager private constructor(
             addProperty("app_version", appVersion)
             addProperty("phone_number", getPhoneNumber())
             addProperty("agency", agency)
-            addProperty("public_key", CryptoManager.getOrGeneratePublicKey())
+            addProperty("public_key", CryptoManager.getOrGeneratePublicKey(context))
             
             val token = config.getEnrollmentToken()
             if (!token.isNullOrBlank()) {
