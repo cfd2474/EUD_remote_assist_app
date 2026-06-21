@@ -3,6 +3,14 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+import java.util.Properties
+
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(keystorePropertiesFile.inputStream())
+}
+
 val gitCommitHash = providers.exec {
     commandLine("git", "rev-parse", "--short", "HEAD")
     isIgnoreExitValue = true
@@ -16,16 +24,30 @@ android {
         applicationId = "com.cfd2474.eudremoteassist"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "3.0.0"
+        versionCode = 7
+        versionName = "3.0.1"
         buildConfigField("String", "GIT_HASH", "\"${gitCommitHash.get()}\"")
     }
     buildFeatures {
         compose = true
         buildConfig = true
     }
+    
+    signingConfigs {
+        create("release") {
+            if (keystorePropertiesFile.exists()) {
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+            }
+        }
+    }
     buildTypes {
         release {
+            if (keystorePropertiesFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

@@ -35,8 +35,9 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
         private const val TAG = "DeviceGateway"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "device_gateway"
-        private const val ACTION_RESTRICTIONS_CHANGED = Intent.ACTION_APPLICATION_RESTRICTIONS_CHANGED
+        const val ACTION_RESTRICTIONS_CHANGED = Intent.ACTION_APPLICATION_RESTRICTIONS_CHANGED
         const val ACTION_SEND_TELEMETRY = "com.cfd2474.eudremoteassist.ACTION_SEND_TELEMETRY"
+        const val ACTION_STOP_REMOTE_ASSIST = "com.cfd2474.eudremoteassist.ACTION_STOP_REMOTE_ASSIST"
 
         @Volatile
         var instance: DeviceGatewayService? = null
@@ -152,6 +153,9 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
         if (intent?.action == ACTION_SEND_TELEMETRY) {
             Log.i(TAG, "ACTION_SEND_TELEMETRY intent received. Triggering immediate telemetry report.")
             sendTelemetryReport()
+        } else if (intent?.action == ACTION_STOP_REMOTE_ASSIST) {
+            Log.i(TAG, "ACTION_STOP_REMOTE_ASSIST intent received. Triggering local stop.")
+            stopRemoteAssist()
         }
 
         return START_STICKY
@@ -595,6 +599,10 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
                 putExtra(ScreenShareService.EXTRA_SIGNAL, messageText)
             }
             startService(forwardIntent)
+            
+            // Auto-trigger the screen capture prompt so the buffered offer will eventually be answered
+            Log.i(TAG, "Auto-triggering START_REMOTE_ADMIN to get projection permission for the incoming offer")
+            handleCommand("START_REMOTE_ADMIN")
         }
     }
 

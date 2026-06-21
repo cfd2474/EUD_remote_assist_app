@@ -1,0 +1,10 @@
+java.lang.NullPointerException: Attempt to read from field 'pr2 om2.a' on a null object reference in method 'void c50.run()'
+	at c50.run(r8-map-id-ba5254df4c8c1ade07ea9543440248d9a79d88b1e970490c649bb9ef1b0b28c7:91)
+	at android.os.Handler.handleCallback(Handler.java:959)
+	at android.os.Handler.dispatchMessage(Handler.java:100)
+	at android.os.Looper.loopOnce(Looper.java:257)
+	at android.os.Looper.loop(Looper.java:342)
+	at android.app.ActivityThread.main(ActivityThread.java:9634)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:619)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:929)

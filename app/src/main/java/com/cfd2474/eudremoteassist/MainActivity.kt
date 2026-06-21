@@ -563,6 +563,27 @@ class MainActivity : ComponentActivity() {
                                 ) {
                                     Text("Refresh Connection", color = Color.White, fontWeight = FontWeight.SemiBold)
                                 }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        val terminateIntent = Intent(context, DeviceGatewayService::class.java).apply {
+                                            action = DeviceGatewayService.ACTION_STOP_REMOTE_ASSIST
+                                        }
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                            context.startForegroundService(terminateIntent)
+                                        } else {
+                                            context.startService(terminateIntent)
+                                        }
+                                        Toast.makeText(context, "Connection Terminated", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFFEF4444)
+                                    )
+                                ) {
+                                    Text("Terminate Connection", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                }
                             }
                         }
 
