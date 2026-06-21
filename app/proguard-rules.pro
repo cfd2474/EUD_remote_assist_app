@@ -17,3 +17,13 @@
 
 # Keep Gson data models
 -keep class com.cfd2474.eudremoteassist.network.** { *; }
+
+# Keep WebRTC classes to prevent JNI crashes in release builds
+-keep class org.webrtc.** { *; }
+-dontwarn org.webrtc.**
+
+# Workaround for R8 synthetic lambda merge bug in AGP causing NPEs in CameraX/MLKit
+-keep class androidx.camera.** { *; }
+-keep class com.google.mlkit.** { *; }
+-keepclassmembers class androidx.camera.** { *; }
+-keepclassmembers class com.google.mlkit.** { *; }
