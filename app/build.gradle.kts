@@ -10,13 +10,12 @@ val gitCommitHash = providers.exec {
 
 android {
     namespace = "com.cfd2474.eudremoteassist"
-    compileSdk {
-        version = release(36) { minorApiLevel = 1 }
-    }
+    compileSdk = 35
+    
     defaultConfig {
         applicationId = "com.cfd2474.eudremoteassist"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 34
         versionCode = 6
         versionName = "3.0.0"
         buildConfigField("String", "GIT_HASH", "\"${gitCommitHash.get()}\"")
@@ -33,8 +32,14 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(21))
     }
 }
 
