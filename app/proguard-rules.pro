@@ -17,3 +17,9 @@
 
 # Keep Gson data models
 -keep class com.cfd2474.eudremoteassist.network.** { *; }
+
+# Workaround for R8 synthetic lambda merge bug in AGP causing NPEs in CameraX/MLKit
+-keep class androidx.camera.** { *; }
+-keep class com.google.mlkit.** { *; }
+-keepclassmembers class androidx.camera.** { *; }
+-keepclassmembers class com.google.mlkit.** { *; }
