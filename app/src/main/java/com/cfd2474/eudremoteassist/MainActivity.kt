@@ -77,10 +77,14 @@ class MainActivity : ComponentActivity() {
     ) { result ->
         if (result.resultCode == RESULT_OK && result.data != null) {
             Log.i(TAG, "MediaProjection permission granted. Starting ScreenShareService.")
+            val iceServersJson = intent.getStringExtra("iceServers")
             val serviceIntent = Intent(this, ScreenShareService::class.java).apply {
                 action = ScreenShareService.ACTION_START
                 putExtra(ScreenShareService.EXTRA_RESULT_CODE, result.resultCode)
                 putExtra(ScreenShareService.EXTRA_RESULT_DATA, result.data)
+                if (iceServersJson != null) {
+                    putExtra("iceServers", iceServersJson)
+                }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(serviceIntent)

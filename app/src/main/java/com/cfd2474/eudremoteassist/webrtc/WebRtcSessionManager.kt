@@ -8,12 +8,14 @@ import android.util.Log
 import com.cfd2474.eudremoteassist.network.NetworkManager
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.google.gson.JsonArray
 import org.webrtc.*
 import java.util.concurrent.ConcurrentLinkedQueue
 
 class WebRtcSessionManager(
     private val context: Context,
     private val networkManager: NetworkManager,
+    private val iceServersJson: String?,
     private val localVideoTrackProvider: () -> VideoTrack?
 ) {
     companion object {
@@ -67,9 +69,36 @@ class WebRtcSessionManager(
             disposePeerConnection()
         }
 
-        val servers = listOf(
-            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
-        )
+        val servers = mutableListOf<PeerConnection.IceServer>()
+        var usingDynamicIce = false
+
+        if (!iceServersJson.isNullOrBlank()) {
+            try {
+                val jsonArray = gson.fromJson(iceServersJson, JsonArray::class.java)
+                for (element in jsonArray) {
+                    val obj = element.asJsonObject
+                    val urls = obj.getAsJsonArray("urls").map { it.asString }
+                    val username = obj.get("username")?.asString
+                    val credential = obj.get("credential")?.asString
+                    
+                    val builder = PeerConnection.IceServer.builder(urls)
+                    if (username != null) builder.setUsername(username)
+                    if (credential != null) builder.setPassword(credential)
+                    
+                    servers.add(builder.createIceServer())
+                }
+                usingDynamicIce = servers.isNotEmpty()
+                Log.i(TAG, "Loaded ${servers.size} custom ICE servers from portal configuration.")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to parse custom ICE servers: ${e.message}")
+            }
+        }
+
+        if (!usingDynamicIce) {
+            Log.i(TAG, "Falling back to default STUN server.")
+            servers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
+        }
+
         val rtcConfig = PeerConnection.RTCConfiguration(servers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY

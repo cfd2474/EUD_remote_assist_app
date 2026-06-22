@@ -420,6 +420,7 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
         Log.i(TAG, "Handling command: $command")
         when (command) {
             "START_REMOTE_ADMIN" -> {
+                val iceServersJson = json.getAsJsonArray("iceServers")?.toString()
                 wakeDevice()
                 val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
                 if (keyguardManager.isKeyguardLocked) {
@@ -441,6 +442,9 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
                 val mainIntent = Intent(this, MainActivity::class.java).apply {
                     action = "com.cfd2474.eudremoteassist.ACTION_REQUEST_PROJECTION"
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                    if (iceServersJson != null) {
+                        putExtra("iceServers", iceServersJson)
+                    }
                 }
                 startActivity(mainIntent)
             }

@@ -109,9 +109,10 @@ class ScreenShareService : Service() {
                     @Suppress("DEPRECATION")
                     intent.getParcelableExtra(EXTRA_RESULT_DATA)
                 }
+                val iceServersJson = intent.getStringExtra("iceServers")
                 
                 if (resultCode != 0 && resultData != null) {
-                    startSession(resultCode, resultData)
+                    startSession(resultCode, resultData, iceServersJson)
                 } else {
                     Log.e(TAG, "Invalid result code or data. Cannot start session.")
                     stopSelf()
@@ -212,7 +213,7 @@ class ScreenShareService : Service() {
     }
 
     // 13.1 Start WebRTC and capture flow
-    private fun startSession(resultCode: Int, resultData: Intent) {
+    private fun startSession(resultCode: Int, resultData: Intent, iceServersJson: String?) {
         Log.i(TAG, "Starting screen share session (fresh projection)")
         
         // Show foreground notification
@@ -226,7 +227,7 @@ class ScreenShareService : Service() {
         if (!backgroundExecutor.isShutdown) {
             backgroundExecutor.execute {
                 try {
-                    sessionManager = WebRtcSessionManager(this, networkManager) {
+                    sessionManager = WebRtcSessionManager(this, networkManager, iceServersJson) {
                         pipeline?.getLocalVideoTrack()
                     }
 
