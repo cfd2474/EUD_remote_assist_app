@@ -20,12 +20,18 @@
 
 # Keep WebRTC classes to prevent JNI crashes in release builds
 -keep class org.webrtc.** { *; }
+-keep class org.jni_zero.** { *; }
 -keep interface org.webrtc.** { *; }
+-keep interface org.jni_zero.** { *; }
 -keepclassmembers class * {
     @org.webrtc.CalledByNative <methods>;
     @org.webrtc.CalledByNative <fields>;
     @org.webrtc.CalledByNativeUnchecked <methods>;
     @org.webrtc.CalledByNativeUnchecked <fields>;
+    @org.jni_zero.CalledByNative <methods>;
+    @org.jni_zero.CalledByNative <fields>;
+    @org.jni_zero.CalledByNativeUnchecked <methods>;
+    @org.jni_zero.CalledByNativeUnchecked <fields>;
 }
 -keepclasseswithmembers class * {
     native <methods>;
