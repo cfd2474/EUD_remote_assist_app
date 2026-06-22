@@ -22,9 +22,9 @@ android {
     defaultConfig {
         applicationId = "com.cfd2474.eudremoteassist"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 7
-        versionName = "3.0.1"
+        targetSdk = 36
+        versionCode = 9
+        versionName = "3.0.3"
         buildConfigField("String", "GIT_HASH", "\"${gitCommitHash.get()}\"")
     }
     buildFeatures {
