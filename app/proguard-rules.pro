@@ -20,6 +20,16 @@
 
 # Keep WebRTC classes to prevent JNI crashes in release builds
 -keep class org.webrtc.** { *; }
+-keep interface org.webrtc.** { *; }
+-keepclassmembers class * {
+    @org.webrtc.CalledByNative <methods>;
+    @org.webrtc.CalledByNative <fields>;
+    @org.webrtc.CalledByNativeUnchecked <methods>;
+    @org.webrtc.CalledByNativeUnchecked <fields>;
+}
+-keepclasseswithmembers class * {
+    native <methods>;
+}
 -dontwarn org.webrtc.**
 
 # Workaround for R8 synthetic lambda merge bug in AGP causing NPEs in CameraX/MLKit
