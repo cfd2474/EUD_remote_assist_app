@@ -407,7 +407,7 @@ class NetworkManager private constructor(
             return
         }
 
-        val url = "$serverUrl/api/v1/commands"
+        val url = "$serverUrl/api/v1/commands?uid=${getDeviceUid()}"
         val request = Request.Builder()
             .url(url)
             .header("X-Connection-Secret", secret)
