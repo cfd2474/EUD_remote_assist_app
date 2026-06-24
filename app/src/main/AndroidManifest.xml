@@ -48,6 +48,11 @@
             android:name="android.content.APP_RESTRICTIONS"
             android:resource="@xml/app_restrictions" />
 
+        <!-- Satellite Network Optimization -->
+        <property
+            android:name="android.telephony.PROPERTY_SATELLITE_DATA_OPTIMIZED"
+            android:value="true" />
+
         <!-- Main Activity -->
         <activity
             android:name=".MainActivity"

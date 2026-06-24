@@ -67,7 +67,11 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
     private val telemetryRunnable = object : Runnable {
         override fun run() {
             sendTelemetryReport()
-            val intervalMinutes = config.getTrackingInterval()
+            var intervalMinutes = config.getTrackingInterval()
+            if (networkManager.isNetworkConstrained()) {
+                intervalMinutes = maxOf(intervalMinutes * 2, 10)
+                Log.i(TAG, "Network is constrained, extending next telemetry interval to $intervalMinutes minutes")
+            }
             handler.postDelayed(this, intervalMinutes * 60 * 1000L)
         }
     }
@@ -630,7 +634,10 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
     // Telemetry reporting logic
     private fun setupTelemetrySchedule() {
         handler.removeCallbacks(telemetryRunnable)
-        val intervalMinutes = config.getTrackingInterval()
+        var intervalMinutes = config.getTrackingInterval()
+        if (networkManager.isNetworkConstrained()) {
+            intervalMinutes = maxOf(intervalMinutes * 2, 10)
+        }
         handler.postDelayed(telemetryRunnable, intervalMinutes * 60 * 1000L)
     }
 

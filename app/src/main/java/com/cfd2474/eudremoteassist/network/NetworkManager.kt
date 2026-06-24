@@ -1,6 +1,8 @@
 package com.cfd2474.eudremoteassist.network
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.provider.Settings
 import android.util.Log
 import com.cfd2474.eudremoteassist.config.ManagedConfigManager
@@ -636,6 +638,29 @@ class NetworkManager private constructor(
             json
         } catch (e: Exception) {
             json
+        }
+    }
+
+    fun isNetworkConstrained(): Boolean {
+        try {
+            val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = connectivityManager.activeNetwork ?: return true
+            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return true
+
+            // If the network does not have the un-constrained capability, it is constrained.
+            if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_CONGESTED)) {
+                return true
+            }
+            
+            // Check for satellite transport (API 35+, TRANSPORT_SATELLITE = 10)
+            if (capabilities.hasTransport(10)) {
+                return true
+            }
+
+            return false
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to check network constraints: ${e.message}")
+            return false
         }
     }
 }
