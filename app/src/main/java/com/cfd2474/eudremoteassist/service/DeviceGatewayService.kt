@@ -425,6 +425,15 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
         when (command) {
             "START_REMOTE_ADMIN" -> {
                 val iceServersJson = json.getAsJsonArray("iceServers")?.toString()
+
+                if (networkManager.isNetworkConstrained()) {
+                    Log.w(TAG, "Cannot start remote admin: Network is constrained")
+                    sendDeviceEvent("WEBRTC_UNAVAILABLE", JsonObject().apply {
+                        addProperty("reason", "WebRTC unavailable because device is on constrained network")
+                    })
+                    return
+                }
+
                 wakeDevice()
                 val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
                 if (keyguardManager.isKeyguardLocked) {
