@@ -8,6 +8,8 @@ import android.os.Looper
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
+import com.cfd2474.eudremoteassist.config.ManagedConfigManager
+import com.cfd2474.eudremoteassist.network.NetworkManager
 import com.cfd2474.eudremoteassist.session.RemoteSessionState
 import org.webrtc.*
 
@@ -28,6 +30,7 @@ class ScreenCapturePipeline(
     private var videoTrack: VideoTrack? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var firstFrameSeen = false
+    private var captureFps = 30
 
     fun getLocalVideoTrack(): VideoTrack? = videoTrack
 
@@ -46,6 +49,17 @@ class ScreenCapturePipeline(
 
         var captureWidth = physicalWidth / 2
         var captureHeight = physicalHeight / 2
+        
+        val isConstrained = NetworkManager.getInstance(context, ManagedConfigManager(context)).isNetworkConstrained()
+        if (isConstrained) {
+            captureWidth = physicalWidth / 4
+            captureHeight = physicalHeight / 4
+            captureFps = 15
+            Log.i(TAG, "Network is constrained. Using reduced capture resolution and FPS.")
+        } else {
+            captureFps = 30
+        }
+
         if (captureWidth % 2 != 0) captureWidth--
         if (captureHeight % 2 != 0) captureHeight--
 
@@ -97,7 +111,7 @@ class ScreenCapturePipeline(
             }
 
             capturer?.initialize(surfaceHelper, context, frameForwardingObserver)
-            capturer?.startCapture(captureWidth, captureHeight, 30)
+            capturer?.startCapture(captureWidth, captureHeight, captureFps)
             
             videoTrack = factory.createVideoTrack("VIDEO_TRACK", videoSource)
             videoTrack?.setEnabled(true)
@@ -113,8 +127,8 @@ class ScreenCapturePipeline(
     fun changeFormat(newWidth: Int, newHeight: Int) {
         Log.i(TAG, "Changing capture format to ${newWidth}x${newHeight}")
         try {
-            capturer?.changeCaptureFormat(newWidth, newHeight, 30)
-            videoSource?.adaptOutputFormat(newWidth, newHeight, 30)
+            capturer?.changeCaptureFormat(newWidth, newHeight, captureFps)
+            videoSource?.adaptOutputFormat(newWidth, newHeight, captureFps)
             
             // Encoder kick
             videoTrack?.setEnabled(false)

@@ -13,4 +13,6 @@
 .externalNativeBuild
 .cxx
 local.properties
-keystore.properties
+
+# Reports
+azure_nsg_configuration_report.md

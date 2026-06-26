@@ -68,7 +68,11 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
     private val telemetryRunnable = object : Runnable {
         override fun run() {
             sendTelemetryReport()
-            val intervalMinutes = config.getTrackingInterval()
+            var intervalMinutes = config.getTrackingInterval()
+            if (networkManager.isNetworkConstrained()) {
+                intervalMinutes = maxOf(intervalMinutes * 2, 10)
+                Log.i(TAG, "Network is constrained, extending next telemetry interval to $intervalMinutes minutes")
+            }
             handler.postDelayed(this, intervalMinutes * 60 * 1000L)
         }
     }
@@ -424,6 +428,16 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
         Log.i(TAG, "Handling command: $command")
         when (command) {
             "START_REMOTE_ADMIN" -> {
+                val iceServersJson = json.getAsJsonArray("iceServers")?.toString()
+
+                if (networkManager.isNetworkConstrained()) {
+                    Log.w(TAG, "Cannot start remote admin: Network is constrained")
+                    sendDeviceEvent("WEBRTC_UNAVAILABLE", JsonObject().apply {
+                        addProperty("reason", "WebRTC unavailable because device is on constrained network")
+                    })
+                    return
+                }
+
                 wakeDevice()
                 val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
                 if (keyguardManager.isKeyguardLocked) {
@@ -445,6 +459,9 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
                 val mainIntent = Intent(this, MainActivity::class.java).apply {
                     action = "com.cfd2474.eudremoteassist.ACTION_REQUEST_PROJECTION"
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                    if (iceServersJson != null) {
+                        putExtra("iceServers", iceServersJson)
+                    }
                 }
                 startActivity(mainIntent)
             }
@@ -634,7 +651,10 @@ class DeviceGatewayService : Service(), WebSocketMessageListener {
     // Telemetry reporting logic
     private fun setupTelemetrySchedule() {
         handler.removeCallbacks(telemetryRunnable)
-        val intervalMinutes = config.getTrackingInterval()
+        var intervalMinutes = config.getTrackingInterval()
+        if (networkManager.isNetworkConstrained()) {
+            intervalMinutes = maxOf(intervalMinutes * 2, 10)
+        }
         handler.postDelayed(telemetryRunnable, intervalMinutes * 60 * 1000L)
     }
 

@@ -1,14 +1,15 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
 
-import java.util.Properties
-
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties = Properties()
 if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(keystorePropertiesFile.inputStream())
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 val gitCommitHash = providers.exec {
@@ -19,6 +20,18 @@ val gitCommitHash = providers.exec {
 android {
     namespace = "com.cfd2474.eudremoteassist"
     compileSdk = 35
+
+    signingConfigs {
+        if (keystorePropertiesFile.exists()) {
+            create("release") {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+            }
+        }
+    }
+
     defaultConfig {
         applicationId = "com.cfd2474.eudremoteassist"
         minSdk = 26
