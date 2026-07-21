@@ -228,4 +228,8 @@ class ManagedConfigManager(private val context: Context) {
             null
         }
     }
+
+    fun getSettingsPassword(): String? {
+        return getMdmString("settings_password")
+    }
 }

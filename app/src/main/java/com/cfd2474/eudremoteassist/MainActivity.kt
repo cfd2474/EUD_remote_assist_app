@@ -810,22 +810,31 @@ class MainActivity : ComponentActivity() {
 
                         // MDM Override Dialog
                         if (showMdmOverrideDialog) {
-                            var showOverrideButton by remember { mutableStateOf(false) }
-
-                            LaunchedEffect(showMdmOverrideDialog) {
-                                showOverrideButton = false
-                                kotlinx.coroutines.delay(30000)
-                                showOverrideButton = true
-                            }
+                            val settingsPassword = config.getSettingsPassword()
+                            var passwordInput by remember { mutableStateOf("") }
+                            val isPasswordCorrect = !settingsPassword.isNullOrBlank() && passwordInput == settingsPassword
 
                             AlertDialog(
                                 onDismissRequest = { showMdmOverrideDialog = false },
                                 title = { Text("MDM Managed Device", color = Color.White, fontWeight = FontWeight.Bold) },
                                 text = {
-                                    Text("This device is currently configured using MDM values.", color = Color.LightGray)
+                                    Column {
+                                        Text("This device is currently configured using MDM values.", color = Color.LightGray)
+                                        if (!settingsPassword.isNullOrBlank()) {
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                            androidx.compose.material3.OutlinedTextField(
+                                                value = passwordInput,
+                                                onValueChange = { passwordInput = it },
+                                                label = { Text("MDM Password", color = Color.Gray) },
+                                                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password),
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
+                                    }
                                 },
                                 confirmButton = {
-                                    if (showOverrideButton) {
+                                    if (settingsPassword.isNullOrBlank() || isPasswordCorrect) {
                                         Button(
                                             onClick = {
                                                 showMdmOverrideDialog = false
